@@ -253,8 +253,9 @@ export default class Complete {
         case 'alphabetical':
           return a.filterText.localeCompare(b.filterText)
         case 'length':
-        default: // Fallback on length
           return a.filterText.length - b.filterText.length
+        default:
+          return
       }
     })
     return this.limitCompleteItems(arr.slice(0, this.config.maxItemCount))
