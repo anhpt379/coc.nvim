@@ -15,6 +15,7 @@ export type ResponseResult = string | Buffer | { [name: string]: any }
 export interface ProxyOptions {
   proxyUrl: string
   strictSSL?: boolean
+  proxyAuthorization?: string | null
 }
 
 function getSystemProxyURI(endpoint: UrlWithStringQuery): string {
@@ -64,7 +65,7 @@ export function getAgent(endpoint: UrlWithStringQuery, options: ProxyOptions): H
     }
     let opts = {
       host: proxyEndpoint.hostname,
-      port: Number(proxyEndpoint.port),
+      port: proxyEndpoint.port ? Number(proxyEndpoint.port) : (proxyEndpoint.protocol === 'https' ? '443' : '80'),
       auth: proxyEndpoint.auth,
       rejectUnauthorized: typeof options.strictSSL === 'boolean' ? options.strictSSL : true
     }
@@ -80,11 +81,13 @@ export function resolveRequestOptions(url: string, options: FetchOptions = {}): 
   let dataType = getDataType(data)
   let proxyOptions: ProxyOptions = {
     proxyUrl: config.get<string>('proxy', ''),
-    strictSSL: config.get<boolean>('proxyStrictSSL', true)
+    strictSSL: config.get<boolean>('proxyStrictSSL', true),
+    proxyAuthorization: config.get<string | null>('proxyAuthorization', null)
   }
   if (options.query && !url.includes('?')) {
     url = `${url}?${stringify(options.query)}`
   }
+  let headers = Object.assign(options.headers || {}, { 'Proxy-Authorization': proxyOptions.proxyAuthorization })
   let endpoint = parse(url)
   let agent = getAgent(endpoint, proxyOptions)
   let opts: any = {
@@ -98,7 +101,7 @@ export function resolveRequestOptions(url: string, options: FetchOptions = {}): 
     headers: Object.assign({
       'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)',
       'Accept-Encoding': 'gzip, deflate'
-    }, options.headers || {})
+    }, headers)
   }
   if (dataType == 'object') {
     opts.headers['Content-Type'] = 'application/json'
@@ -122,8 +125,8 @@ function request(url: string, data: any, opts: any): Promise<ResponseResult> {
       if ((res.statusCode >= 200 && res.statusCode < 300) || res.statusCode === 1223) {
         let headers = res.headers || {}
         let chunks: Buffer[] = []
-        let contentType = headers['content-type'] || ''
-        let contentEncoding = headers['content-encoding'] || ''
+        let contentType: string = headers['content-type'] || ''
+        let contentEncoding: string = headers['content-encoding'] || ''
         if (contentEncoding === 'gzip') {
           const unzip = zlib.createGunzip()
           readable = res.pipe(unzip)
@@ -137,10 +140,8 @@ function request(url: string, data: any, opts: any): Promise<ResponseResult> {
         })
         readable.on('end', () => {
           let buf = Buffer.concat(chunks)
-          if (contentType.includes('application/octet-stream')
-            || contentType.includes('application/zip')) {
-            resolve(buf)
-          } else {
+          if (contentType.startsWith('application/json')
+            || contentType.startsWith('text/')) {
             let ms = contentType.match(/charset=(\S+)/)
             let encoding = ms ? ms[1] : 'utf8'
             let rawData = buf.toString(encoding)
@@ -154,6 +155,8 @@ function request(url: string, data: any, opts: any): Promise<ResponseResult> {
                 reject(new Error(`Parse response error: ${e}`))
               }
             }
+          } else {
+            resolve(buf)
           }
         })
         readable.on('error', err => {

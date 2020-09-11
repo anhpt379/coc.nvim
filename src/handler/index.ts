@@ -236,7 +236,7 @@ export default class Handler {
         nvim.command('setlocal conceallevel=2 nospell nofoldenable wrap', true)
         nvim.command('setlocal bufhidden=wipe nobuflisted', true)
         nvim.command('setfiletype markdown', true)
-        nvim.command(`exe "normal! z${Math.min(this.documentLines.length, this.preferences.previewMaxHeight)}\\<cr>"`, true)
+        nvim.command(`if winnr('j') != winnr('k') | exe "normal! z${Math.min(this.documentLines.length, this.preferences.previewMaxHeight)}\\<cr> | endif"`, true)
         await nvim.resumeNotification()
         return this.documentLines.join('\n')
       }
@@ -529,6 +529,7 @@ export default class Handler {
       return null
     }
     let definitions = await languages.getDefinition(document.textDocument, position)
+    if (!definitions || !definitions.length) return null
     return definitions.map(location => {
       let parsedURI = URI.parse(location.uri)
       const filename = parsedURI.scheme == 'file' ? parsedURI.fsPath : parsedURI.toString()
@@ -1149,7 +1150,7 @@ export default class Handler {
       workspace.showMessage('Invalid position for rename', 'error')
       return
     }
-    let edit = await languages.provideRenameEdits(doc.textDocument, position, 'newname')
+    let edit = await languages.provideRenameEdits(doc.textDocument, position, 'NewName')
     if (!edit) {
       workspace.showMessage('Empty workspaceEdit from server', 'warning')
       return

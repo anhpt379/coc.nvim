@@ -165,7 +165,7 @@ export default class FloatBuffer {
         lines,
         filetype: doc.filetype
       })
-      let filtered = doc.filetype == 'markdown' ? lines.filter(s => !/^\s*```/.test(s)) : lines
+      let filtered = workspace.isNvim && doc.filetype === 'markdown' ? lines.filter(s => !/^\s*```/.test(s)) : lines
       newLines.push(...filtered)
       if (idx != docs.length - 1) {
         newLines.push('—'.repeat(width - 2))
@@ -184,8 +184,7 @@ export default class FloatBuffer {
     for (let doc of docs) {
       let lines = doc.content.split(/\r?\n/)
       for (let line of lines) {
-        if (doc.filetype == 'markdown'
-          && /^\s*```/.test(line)) {
+        if (workspace.isNvim && doc.filetype == 'markdown' && /^\s*```/.test(line)) {
           continue
         }
         arr.push(byteLength(line.replace(/\t/g, '  ')) + 2)
