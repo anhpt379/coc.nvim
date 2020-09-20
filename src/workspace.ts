@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Buffer, NeovimClient as Neovim } from '@chemzqm/neovim'
 import bytes from 'bytes'
 import fastDiff from 'fast-diff'
@@ -132,6 +133,9 @@ export class Workspace implements IWorkspace {
     }, null, this.disposables)
     events.on('InsertLeave', () => {
       this._insertMode = false
+    }, null, this.disposables)
+    events.on('BufWinLeave', (_, winid) => {
+      this.nvim.call('coc#util#clear_pos_matches', ['^Coc', winid], true)
     }, null, this.disposables)
     events.on('BufEnter', this.onBufEnter, this, this.disposables)
     events.on('CursorMoved', this.checkCurrentBuffer, this, this.disposables)
@@ -324,7 +328,7 @@ export class Workspace implements IWorkspace {
   }
 
   public get textDocuments(): TextDocument[] {
-    let docs = []
+    let docs: TextDocument[] = []
     for (let b of this.buffers.values()) {
       docs.push(b.textDocument)
     }
@@ -463,9 +467,12 @@ export class Workspace implements IWorkspace {
     if (typeof uri === 'number') {
       return this.buffers.get(uri)
     }
+    const caseInsensitive = platform.isWindows || platform.isMacintosh
     uri = URI.parse(uri).toString()
     for (let doc of this.buffers.values()) {
-      if (doc && doc.uri === uri) return doc
+      if (!doc) continue
+      if (doc.uri === uri) return doc
+      if (caseInsensitive && doc.uri.toLowerCase() === uri.toLowerCase()) return doc
     }
     return null
   }
@@ -787,6 +794,7 @@ export class Workspace implements IWorkspace {
     return rel.startsWith('..') ? filepath : rel
   }
 
+  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
   public onWillSaveUntil(callback: (event: TextDocumentWillSaveEvent) => void, thisArg: any, clientId: string): Disposable {
     return this.willSaveUntilHandler.addCallback(callback, thisArg, clientId)
   }
@@ -1031,7 +1039,7 @@ export class Workspace implements IWorkspace {
         if (newDoc) await this.nvim.command(`silent ${newDoc.bufnr}bwipeout!`)
         if (doc != null) {
           let content = doc.getDocumentContent()
-          let encoding = await doc.buffer.getOption('fileencoding') as string
+          let encoding = await doc.buffer.getOption('fileencoding') as any
           await util.promisify(fs.writeFile)(newPath, content, { encoding })
           // open renamed file
           if (!isCurrent) {
@@ -1306,10 +1314,18 @@ export class Workspace implements IWorkspace {
   }
 
   /**
-   * Register keymap
+   * Register unique keymap uses `<Plug>(coc-{key})` as lhs
+   * Throw error when {key} already exists.
+   *
+   * @param {MapMode[]} modes - array of 'n' | 'i' | 'v' | 'x' | 's' | 'o'
+   * @param {string} key - unique name
+   * @param {Function} fn - callback function
+   * @param {Partial} opts
+   * @returns {Disposable}
    */
   public registerKeymap(modes: MapMode[], key: string, fn: Function, opts: Partial<KeymapOption> = {}): Disposable {
-    if (!key || this.keymaps.has(key)) return
+    if (!key) throw new Error(`Invalid key ${key} of registerKeymap`)
+    if (this.keymaps.has(key)) throw new Error(`${key} already exists.`)
     opts = Object.assign({ sync: true, cancel: true, silent: true, repeat: false }, opts)
     let { nvim } = this
     this.keymaps.set(key, [fn, !!opts.repeat])
@@ -1402,7 +1418,8 @@ export class Workspace implements IWorkspace {
   public createDatabase(name: string): DB {
     let root: string
     if (global.hasOwnProperty('__TEST__')) {
-      root = fs.mkdtempSync(path.join(os.tmpdir(), 'coc-'))
+      root = path.join(os.tmpdir(), `coc-${process.pid}`)
+      fs.mkdirSync(root, { recursive: true })
     } else {
       root = path.dirname(this.env.extensionRoot)
     }

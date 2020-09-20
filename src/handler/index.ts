@@ -1,6 +1,7 @@
 import { NeovimClient as Neovim } from '@chemzqm/neovim'
-import { CancellationTokenSource, CodeActionContext, CodeActionKind, Definition, Disposable, DocumentLink, DocumentSymbol, ExecuteCommandParams, ExecuteCommandRequest, Hover, Location, LocationLink, MarkedString, MarkupContent, Position, Range, SelectionRange, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
-import { Document } from '..'
+import { CancellationToken, CancellationTokenSource, CodeActionContext, CodeActionKind, Definition, Disposable, DocumentLink, DocumentSymbol, ExecuteCommandParams, ExecuteCommandRequest, Hover, Location, LocationLink, MarkedString, MarkupContent, Position, Range, SelectionRange, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { URI } from 'vscode-uri'
+import { Document, StatusBarItem } from '..'
 import commandManager from '../commands'
 import diagnosticManager from '../diagnostic/manager'
 import events from '../events'
@@ -14,7 +15,7 @@ import { CodeAction, Documentation, TagDefinition } from '../types'
 import { disposeAll, wait } from '../util'
 import { getSymbolKind } from '../util/convert'
 import { equals } from '../util/object'
-import { emptyRange, positionInRange, rangeInRange, getChangedFromEdits } from '../util/position'
+import { emptyRange, getChangedFromEdits, positionInRange, rangeInRange } from '../util/position'
 import { byteLength, isWord } from '../util/string'
 import workspace from '../workspace'
 import CodeLensManager from './codelens'
@@ -23,7 +24,6 @@ import DocumentHighlighter from './documentHighlight'
 import Refactor from './refactor'
 import Search from './search'
 import debounce = require('debounce')
-import { URI } from 'vscode-uri'
 const logger = require('../util/logger')('Handler')
 const pairs: Map<string, string> = new Map([
   ['<', '>'],
@@ -89,9 +89,15 @@ export default class Handler {
   private labels: { [key: string]: string } = {}
   private selectionRange: SelectionRange = null
   private signaturePosition: Position
+  private requestStatusItem: StatusBarItem
+  private requestTokenSource: CancellationTokenSource | undefined
+  private requestTimer: NodeJS.Timer
+  private symbolsTokenSources: Map<number, CancellationTokenSource> = new Map()
+  private cachedSymbols: Map<number, [number, SymbolInfo[]]> = new Map()
 
   constructor(private nvim: Neovim) {
     this.getPreferences()
+    this.requestStatusItem = workspace.createStatusBarItem(0, { progress: true })
     workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('coc.preferences')) {
         this.getPreferences()
@@ -114,6 +120,11 @@ export default class Handler {
       if (refactor) {
         refactor.dispose()
         this.refactorMap.delete(bufnr)
+      }
+    }, null, this.disposables)
+    events.on(['CursorMoved', 'InsertEnter'], () => {
+      if (this.requestTokenSource) {
+        this.requestTokenSource.cancel()
       }
     }, null, this.disposables)
     events.on('CursorMovedI', async (bufnr, cursor) => {
@@ -261,6 +272,29 @@ export default class Handler {
     commandManager.titles.set('editor.action.organizeImport', 'run organize import code action.')
   }
 
+  private getRequestToken(name: string): CancellationToken {
+    if (this.requestTokenSource) {
+      this.requestTokenSource.cancel()
+    }
+    this.requestTokenSource = new CancellationTokenSource()
+    let { token } = this.requestTokenSource
+    let disposable = token.onCancellationRequested(() => {
+      disposable.dispose()
+      this.requestStatusItem.text = `${name} request canceled`
+      this.requestStatusItem.isProgress = false
+      this.requestTimer = setTimeout(() => {
+        this.requestStatusItem.hide()
+      }, 500)
+    })
+    this.requestStatusItem.isProgress = true
+    this.requestStatusItem.text = `requesting ${name}`
+    this.requestStatusItem.show()
+    if (this.requestTimer) {
+      clearTimeout(this.requestTimer)
+    }
+    return token
+  }
+
   public async getCurrentFunctionSymbol(): Promise<string> {
     let position = await workspace.getCursorPosition()
     let buffer = await this.nvim.buffer
@@ -303,17 +337,19 @@ export default class Handler {
 
   public async onHover(): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let hovers = await languages.getHover(document, position)
-    if (hovers && hovers.length) {
-      let hover = hovers.find(o => Range.is(o.range))
-      if (hover) {
-        let doc = workspace.getDocument(document.uri)
-        if (doc) {
-          let ids = doc.matchAddRanges([hover.range], 'CocHoverRange', 999)
-          setTimeout(() => {
-            this.nvim.call('coc#util#clearmatches', [ids], true)
-          }, 1000)
-        }
+    let winid = await this.nvim.call('win_getid') as number
+    let token = this.getRequestToken('hover')
+    let hovers = await languages.getHover(document, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('hover', hovers)) return false
+    let hover = hovers.find(o => Range.is(o.range))
+    if (hover) {
+      let doc = workspace.getDocument(document.uri)
+      if (doc) {
+        doc.matchAddRanges([hover.range], 'CocHoverRange', 999)
+        setTimeout(() => {
+          this.nvim.call('coc#util#clear_pos_matches', ['^CocHoverRange', winid], true)
+        }, 1000)
       }
       await this.previewHover(hovers)
       return true
@@ -329,65 +365,68 @@ export default class Handler {
 
   public async gotoDefinition(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let definition = await languages.getDefinition(document, position)
-    if (isEmpty(definition)) {
-      this.onEmptyLocation('Definition', definition)
-      return false
-    }
+    let token = this.getRequestToken('definition')
+    let definition = await languages.getDefinition(document, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('definition', definition)) return false
     await this.handleLocations(definition, openCommand)
     return true
   }
 
   public async gotoDeclaration(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let definition = await languages.getDeclaration(document, position)
-    if (isEmpty(definition)) {
-      this.onEmptyLocation('Declaration', definition)
-      return false
-    }
+    let token = this.getRequestToken('declaration')
+    let definition = await languages.getDeclaration(document, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('declaration', definition)) return false
     await this.handleLocations(definition, openCommand)
     return true
   }
 
   public async gotoTypeDefinition(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let definition = await languages.getTypeDefinition(document, position)
-    if (isEmpty(definition)) {
-      this.onEmptyLocation('Type definition', definition)
-      return false
-    }
+    let token = this.getRequestToken('type definition')
+    let definition = await languages.getTypeDefinition(document, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('type definition', definition)) return false
     await this.handleLocations(definition, openCommand)
     return true
   }
 
   public async gotoImplementation(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let definition = await languages.getImplementation(document, position)
-    if (isEmpty(definition)) {
-      this.onEmptyLocation('Implementation', definition)
-      return false
-    }
+    let token = this.getRequestToken('implementation')
+    let definition = await languages.getImplementation(document, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('implementation', definition)) return false
     await this.handleLocations(definition, openCommand)
     return true
   }
 
   public async gotoReferences(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
-    let locs = await languages.getReferences(document, { includeDeclaration: false }, position)
-    if (isEmpty(locs)) {
-      this.onEmptyLocation('References', locs)
-      return false
-    }
+    let token = this.getRequestToken('references')
+    let locs = await languages.getReferences(document, { includeDeclaration: false }, position, token)
+    if (token.isCancellationRequested) return false
+    if (this.checkEmpty('references', locs)) return false
     await this.handleLocations(locs, openCommand)
     return true
   }
 
-  public async getDocumentSymbols(document?: Document): Promise<SymbolInfo[]> {
-    document = document || workspace.getDocument(workspace.bufnr)
-    if (!document) return []
-    let symbols = await languages.getDocumentSymbol(document.textDocument)
-    if (!symbols) return null
-    if (symbols.length == 0) return []
+  public async getDocumentSymbols(doc: Document): Promise<SymbolInfo[]> {
+    if (!doc) return []
+    await synchronizeDocument(doc)
+    let cached = this.cachedSymbols.get(doc.bufnr)
+    if (cached && cached[0] == doc.version) {
+      return cached[1]
+    }
+    this.symbolsTokenSources.get(doc.bufnr)?.cancel()
+    let tokenSource = new CancellationTokenSource()
+    this.symbolsTokenSources.set(doc.bufnr, tokenSource)
+    let { version } = doc
+    let symbols = await languages.getDocumentSymbol(doc.textDocument, tokenSource.token)
+    this.symbolsTokenSources.delete(doc.bufnr)
+    if (!symbols || symbols.length == 0) return null
     let level = 0
     let res: SymbolInfo[] = []
     let pre = null
@@ -422,6 +461,7 @@ export default class Handler {
         pre = o
       }
     }
+    this.cachedSymbols.set(doc.bufnr, [version, res])
     return res
   }
 
@@ -528,7 +568,8 @@ export default class Handler {
     if (!languages.hasProvider('definition', document.textDocument)) {
       return null
     }
-    let definitions = await languages.getDefinition(document.textDocument, position)
+    let { token } = this.requestTokenSource
+    let definitions = await languages.getDefinition(document.textDocument, position, token)
     if (!definitions || !definitions.length) return null
     return definitions.map(location => {
       let parsedURI = URI.parse(location.uri)
@@ -594,7 +635,7 @@ export default class Handler {
       codeActions = codeActions.filter(o => o.title == only || (o.command && o.command.title == only))
     }
     if (!codeActions || codeActions.length == 0) {
-      workspace.showMessage(`CodeAction${only ? ' ' + only : ''} not found`, 'warning')
+      workspace.showMessage(`No${only ? ' ' + only : ''} code action available`, 'warning')
       return
     }
     if (!only || codeActions.length > 1) {
@@ -622,6 +663,11 @@ export default class Handler {
     return await this.getCodeActions(bufnr, range, only)
   }
 
+  /**
+   * Invoke preferred quickfix at current position, return false when failed
+   *
+   * @returns {Promise<boolean>}
+   */
   public async doQuickfix(): Promise<boolean> {
     let actions = await this.getCurrentCodeActions('n', [CodeActionKind.QuickFix])
     if (!actions || actions.length == 0) {
@@ -708,13 +754,13 @@ export default class Handler {
   }
 
   public async highlight(): Promise<void> {
-    let bufnr = await this.nvim.call('bufnr', '%')
-    await this.documentHighlighter.highlight(bufnr)
+    let [bufnr, arr] = await this.nvim.eval('[bufnr("%"),coc#util#cursor()]') as [number, [number, number]]
+    await this.documentHighlighter.highlight(bufnr, Position.create(arr[0], arr[1]))
   }
 
   public async getSymbolsRanges(): Promise<Range[]> {
-    let document = await workspace.document
-    let highlights = await this.documentHighlighter.getHighlights(document)
+    let [bufnr, arr] = await this.nvim.eval('[bufnr("%"),coc#util#cursor()]') as [number, [number, number]]
+    let highlights = await this.documentHighlighter.getHighlights(workspace.getDocument(bufnr), Position.create(arr[0], arr[1]))
     if (!highlights) return null
     return highlights.map(o => o.range)
   }
@@ -830,13 +876,31 @@ export default class Handler {
     let pos: Position = insertLeave ? { line: position.line, character: origLine.length } : position
     let { changedtick } = doc
     await synchronizeDocument(doc)
-    let edits = await languages.provideDocumentOnTypeEdits(ch, doc.textDocument, pos)
-    if (edits && edits.length && doc.changedtick == changedtick) {
-      let changed = getChangedFromEdits(position, edits)
-      await doc.applyEdits(edits)
-      let to = changed ? Position.create(position.line + changed.line, position.character + changed.character) : null
-      if (to) await workspace.moveTo(to)
+    if (doc.changedtick != changedtick) return
+    let tokenSource = new CancellationTokenSource()
+    let disposable = doc.onDocumentChange(() => {
+      clearTimeout(timer)
+      disposable.dispose()
+      tokenSource.cancel()
+    })
+    let timer = setTimeout(() => {
+      disposable.dispose()
+      tokenSource.cancel()
+    }, 2000)
+    let edits: TextEdit[]
+    try {
+      edits = await languages.provideDocumentOnTypeEdits(ch, doc.textDocument, pos, tokenSource.token)
+    } catch (e) {
+      logger.error(`Error on format: ${e.message}`, e.stack)
     }
+    if (!edits || !edits.length) return
+    if (tokenSource.token.isCancellationRequested) return
+    clearTimeout(timer)
+    disposable.dispose()
+    let changed = getChangedFromEdits(position, edits)
+    await doc.applyEdits(edits)
+    let to = changed ? Position.create(position.line + changed.line, position.character + changed.character) : null
+    if (to) await workspace.moveTo(to)
   }
 
   private async triggerSignatureHelp(document: Document, position: Position): Promise<boolean> {
@@ -1061,7 +1125,10 @@ export default class Handler {
 
   public async getSelectionRanges(): Promise<SelectionRange[] | null> {
     let { document, position } = await workspace.getCurrentState()
-    let selectionRanges: SelectionRange[] = await languages.getSelectionRanges(document, [position])
+    let token = this.getRequestToken('selection ranges')
+    let selectionRanges: SelectionRange[] = await languages.getSelectionRanges(document, [position], token)
+    if (token.isCancellationRequested) return null
+    if (this.checkEmpty('selection ranges', selectionRanges)) return null
     if (selectionRanges && selectionRanges.length) return selectionRanges
     return null
   }
@@ -1094,15 +1161,10 @@ export default class Handler {
       }
       return
     }
-    let selectionRanges: SelectionRange[] = await languages.getSelectionRanges(doc.textDocument, positions)
-    if (selectionRanges == null) {
-      workspace.showMessage('Selection range provider not found for current document', 'warning')
-      return
-    }
-    if (!selectionRanges || selectionRanges.length == 0) {
-      workspace.showMessage('No selection range found', 'warning')
-      return
-    }
+    let token = this.getRequestToken('selection ranges')
+    let selectionRanges: SelectionRange[] = await languages.getSelectionRanges(doc.textDocument, positions, token)
+    if (token.isCancellationRequested) return
+    if (this.checkEmpty('selection ranges', selectionRanges)) return
     let mode = await nvim.eval('mode()')
     if (mode != 'n') await nvim.eval(`feedkeys("\\<Esc>", 'in')`)
     let selectionRange: SelectionRange
@@ -1264,12 +1326,24 @@ export default class Handler {
     }
   }
 
-  private onEmptyLocation(name: string, location: any | null): void {
-    if (location == null) {
-      workspace.showMessage(`${name} provider not found for current document`, 'warning')
-    } else if (location.length == 0) {
-      workspace.showMessage(`${name} not found`, 'warning')
+  private checkEmpty(name: string, location: any | null): boolean {
+    let statusItem = this.requestStatusItem
+    if (this.requestTokenSource) {
+      this.requestTokenSource.dispose()
+      this.requestTokenSource = undefined
     }
+    if (location == null) {
+      statusItem.hide()
+      workspace.showMessage(`${name} provider not found for current document`, 'warning')
+      return true
+    }
+    if (Array.isArray(location) && location.length == 0) {
+      statusItem.hide()
+      workspace.showMessage(`${name} not found`, 'warning')
+      return true
+    }
+    this.requestStatusItem.hide()
+    return false
   }
 
   public dispose(): void {
@@ -1337,12 +1411,6 @@ function sortSymbolInformations(a: SymbolInformation, b: SymbolInformation): num
 
 function isDocumentSymbol(a: DocumentSymbol | SymbolInformation): a is DocumentSymbol {
   return a && !a.hasOwnProperty('location')
-}
-
-function isEmpty(location: any): boolean {
-  if (!location) return true
-  if (Array.isArray(location) && location.length == 0) return true
-  return false
 }
 
 function isDocumentSymbols(a: DocumentSymbol[] | SymbolInformation[]): a is DocumentSymbol[] {

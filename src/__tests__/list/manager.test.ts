@@ -28,31 +28,23 @@ beforeAll(async () => {
 })
 
 afterEach(async () => {
-  await manager.cancel()
+  await manager.reset()
   await helper.reset()
+  await helper.wait(100)
 })
 
 afterAll(async () => {
-  await helper.wait(300)
   await helper.shutdown()
 })
 
 describe('list commands', () => {
   it('should be activated', async () => {
     await manager.start(['location'])
+    await manager.session.ui.ready
+    await helper.wait(50)
     expect(manager.isActivated).toBe(true)
-    expect(manager.name).toBe('location')
-    await helper.wait(500)
     let line = await nvim.getLine()
     expect(line).toMatch(/manager.test.ts/)
-  })
-
-  it('should cancel exists session', async () => {
-    await manager.start(['extensions'])
-    await helper.wait(100)
-    await manager.start(['location'])
-    expect(manager.isActivated).toBe(true)
-    expect(manager.name).toBe('location')
   })
 
   it('should get list names', () => {
@@ -62,7 +54,8 @@ describe('list commands', () => {
 
   it('should resume list', async () => {
     await manager.start(['--normal', 'location'])
-    await helper.wait(300)
+    await manager.session.ui.ready
+    await helper.wait(30)
     await nvim.eval('feedkeys("j", "in")')
     await helper.wait(30)
     let line = await nvim.call('line', '.')
@@ -70,14 +63,14 @@ describe('list commands', () => {
     await manager.cancel()
     await helper.wait(30)
     await manager.resume()
-    await helper.wait(60)
+    await helper.wait(30)
     line = await nvim.call('line', '.')
     expect(line).toBe(2)
   })
 
   it('should not quit list with --no-quit', async () => {
     await manager.start(['--normal', '--no-quit', 'location'])
-    await helper.wait(300)
+    await manager.session.ui.ready
     let winnr = await nvim.eval('win_getid()')
     await manager.doAction()
     await helper.wait(100)
@@ -88,7 +81,7 @@ describe('list commands', () => {
 
   it('should do default action for first item', async () => {
     await manager.start(['--normal', '--first', 'location'])
-    await helper.wait(100)
+    await helper.wait(300)
     let name = await nvim.eval('bufname("%")') as string
     let filename = path.basename(__filename)
     expect(name.includes(filename)).toBe(true)
@@ -116,7 +109,7 @@ describe('list commands', () => {
   it('should parse arguments', async () => {
     await manager.start(['--input=test', '--normal', '--no-sort', '--ignore-case', '--top', '--number-select', '--auto-preview', '--strict', 'location'])
     await helper.wait(30)
-    let opts = manager.listOptions
+    let opts = manager.session?.listOptions
     expect(opts).toEqual({
       numberSelect: true,
       autoPreview: true,
@@ -128,7 +121,6 @@ describe('list commands', () => {
       position: 'top',
       mode: 'normal',
       noQuit: false,
-      noResize: false,
       sort: false
     })
   })
@@ -136,42 +128,45 @@ describe('list commands', () => {
 
 describe('list options', () => {
   it('should respect input option', async () => {
-    await manager.start(['--input=a', 'location'])
+    await manager.start(['--input=foo', 'location'])
+    await manager.session.ui.ready
+    await helper.wait(30)
     let line = await helper.getCmdline()
-    expect(line).toMatch('a')
+    expect(line).toMatch('foo')
     expect(manager.isActivated).toBe(true)
   })
 
   it('should respect regex filter', async () => {
     await manager.start(['--input=f.o', '--regex', 'location'])
     await helper.wait(200)
-    let item = await manager.ui.item
+    let item = await manager.session?.ui.item
     expect(item.label).toMatch('foo')
   })
 
   it('should respect normal option', async () => {
     await manager.start(['--normal', 'location'])
-    expect(manager.isActivated).toBe(true)
-    await helper.wait(200)
+    await manager.session.ui.ready
     let line = await helper.getCmdline()
     expect(line).toBe('')
   })
 
   it('should respect nosort option', async () => {
     await manager.start(['--ignore-case', '--no-sort', 'location'])
-    await helper.wait(200)
+    await manager.session.ui.ready
     expect(manager.isActivated).toBe(true)
     await nvim.input('oo')
-    await helper.wait(500)
+    await helper.wait(100)
+    let line = await nvim.call('getline', ['.'])
+    expect(line).toMatch('foo')
   })
 
   it('should respect ignorecase option', async () => {
     await manager.start(['--ignore-case', '--strict', 'location'])
-    await helper.wait(200)
+    await manager.session.ui.ready
     expect(manager.isActivated).toBe(true)
     await nvim.input('bar')
-    await helper.wait(500)
-    let n = manager.ui.length
+    await helper.wait(100)
+    let n = manager.session?.ui.length
     expect(n).toBe(1)
     let line = await nvim.line
     expect(line).toMatch('Bar')
@@ -179,15 +174,14 @@ describe('list options', () => {
 
   it('should respect top option', async () => {
     await manager.start(['--top', 'location'])
-    expect(manager.isActivated).toBe(true)
-    await helper.wait(300)
+    await manager.session.ui.ready
     let nr = await nvim.call('winnr')
     expect(nr).toBe(1)
   })
 
   it('should respect number select option', async () => {
     await manager.start(['--number-select', 'location'])
-    expect(manager.isActivated).toBe(true)
+    await manager.session.ui.ready
     await helper.wait(100)
     await nvim.eval('feedkeys("2", "in")')
     await helper.wait(100)
@@ -213,7 +207,8 @@ describe('list options', () => {
 
   it('should respect tab option', async () => {
     await manager.start(['--tab', '--auto-preview', 'location'])
-    await helper.wait(300)
+    await manager.session.ui.ready
+    await helper.wait(200)
     await nvim.command('wincmd l')
     let previewwindow = await nvim.eval('&previewwindow')
     expect(previewwindow).toBe(1)
@@ -224,19 +219,9 @@ describe('list configuration', () => {
   it('should change indicator', async () => {
     helper.updateConfiguration('list.indicator', '>>')
     await manager.start(['location'])
-    await helper.wait(300)
+    await helper.wait(200)
     let line = await helper.getCmdline()
     expect(line).toMatch('>>')
-  })
-
-  it('should change max height limit', async () => {
-    helper.updateConfiguration('list.maxHeight', 2)
-    await manager.start(['location'])
-    await helper.wait(100)
-    let win = await nvim.window
-    let height = await win.height
-    expect(height).toBe(2)
-    helper.updateConfiguration('list.maxHeight', 12)
   })
 
   it('should split right for preview window', async () => {
@@ -256,28 +241,17 @@ describe('list configuration', () => {
     helper.updateConfiguration('list.previewSplitRight', false)
   })
 
-  it('should change autoResize', async () => {
-    helper.updateConfiguration('list.autoResize', false)
-    await manager.start(['location'])
-    await helper.wait(100)
-    await nvim.eval('feedkeys("b", "in")')
-    await helper.wait(100)
-    let win = await nvim.window
-    let height = await win.height
-    expect(height).toBe(3)
-  })
-
   it('should toggle selection mode', async () => {
     await manager.start(['--normal', 'location'])
-    await manager.ui.ready
+    await manager.session?.ui.ready
     await nvim.input('V')
     await helper.wait(30)
     await nvim.input('1')
     await helper.wait(30)
     await nvim.input('j')
     await helper.wait(100)
-    await manager.ui.toggleSelection()
-    let items = await manager.ui.getItems()
+    await manager.session?.ui.toggleSelection()
+    let items = await manager.session?.ui.getItems()
     expect(items.length).toBe(2)
   })
 
@@ -285,6 +259,7 @@ describe('list configuration', () => {
     helper.updateConfiguration('list.nextKeymap', '<tab>')
     helper.updateConfiguration('list.previousKeymap', '<s-tab>')
     await manager.start(['location'])
+    await manager.session.ui.ready
     await helper.wait(100)
     await nvim.eval('feedkeys("\\<tab>", "in")')
     await helper.wait(100)
@@ -298,12 +273,13 @@ describe('list configuration', () => {
 
   it('should respect mouse events', async () => {
     async function setMouseEvent(line: number): Promise<void> {
-      let window = manager.ui.window
-      await nvim.command(`let v:mouse_winid = ${window.id}`)
+      let winid = manager.session?.ui.winid
+      await nvim.command(`let v:mouse_winid = ${winid}`)
       await nvim.command(`let v:mouse_lnum = ${line}`)
       await nvim.command(`let v:mouse_col = 1`)
     }
     await manager.start(['--normal', 'location'])
+    await manager.session.ui.ready
     await helper.wait(100)
     await setMouseEvent(1)
     await manager.onMouseEvent('<LeftMouse>')
@@ -312,13 +288,14 @@ describe('list configuration', () => {
     await setMouseEvent(3)
     await manager.onMouseEvent('<LeftRelease>')
     await helper.wait(30)
-    let items = await manager.ui.getItems()
+    let items = await manager.session?.ui.getItems()
     expect(items.length).toBe(3)
   })
 
   it('should toggle preview', async () => {
     await manager.start(['--normal', '--auto-preview', 'location'])
-    await helper.wait(200)
+    await manager.session.ui.ready
+    await helper.wait(100)
     await manager.togglePreview()
     await helper.wait(100)
     await manager.togglePreview()
@@ -330,7 +307,7 @@ describe('list configuration', () => {
   it('should show help of current list', async () => {
     await manager.start(['--normal', '--auto-preview', 'location'])
     await helper.wait(200)
-    await manager.showHelp()
+    await manager.session?.showHelp()
     let bufname = await nvim.call('bufname', '%')
     expect(bufname).toBe('[LIST HELP]')
   })
@@ -352,7 +329,8 @@ describe('list configuration', () => {
     }
     let disposable = manager.registerList(list)
     await manager.start(['--normal', 'test'])
-    await helper.wait(500)
+    await manager.session.ui.ready
+    await helper.wait(50)
     let line = await nvim.line
     expect(line).toBe('f')
     disposable.dispose()

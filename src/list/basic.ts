@@ -76,6 +76,9 @@ export default abstract class BasicList implements IList, Disposable {
     return res
   }
 
+  /**
+   * Get configuration of current list
+   */
   protected getConfig(): WorkspaceConfiguration {
     return workspace.getConfiguration(`list.source.${this.name}`)
   }
@@ -241,7 +244,7 @@ export default abstract class BasicList implements IList, Disposable {
       nvim.call('matchaddpos', [this.hlGroup, [pos]], true)
     }
     if (!exists) nvim.command('setl nobuflisted bufhidden=wipe', true)
-    nvim.command('normal! zz', true)
+    nvim.command('normal! zt', true)
     nvim.call('win_gotoid', [winid], true)
     if (workspace.isVim) nvim.command('redraw', true)
     let [, err] = await nvim.resumeNotification()
@@ -285,7 +288,7 @@ export default abstract class BasicList implements IList, Disposable {
     } else if (filetype) {
       nvim.command(`setf ${filetype}`, true)
     }
-    if (lnum && lnum != 1) nvim.command('normal! zz', true)
+    if (lnum && lnum != 1) nvim.command('normal! zt', true)
     nvim.call('win_gotoid', [winid], true)
     if (workspace.isVim) nvim.command('redraw', true)
     let [, err] = await nvim.resumeNotification()

@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-06/schema",
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Configuration file for coc.nvim",
   "additionalProperties": false,
   "definitions": {
@@ -511,6 +511,11 @@
       "default": "hint",
       "enum": ["hint", "information", "warning", "error"]
     },
+    "diagnostic.locationlistUpdate": {
+      "type": "boolean",
+      "description": "Update locationlist on diagnostics change, only works with locationlist opened by :CocDiagnostics command and first window of associated buffer.",
+      "default": true
+    },
     "diagnostic.checkCurrentLine": {
       "type": "boolean",
       "description": "When enabled, show all diagnostics of current line if there are none at the current position.",
@@ -723,15 +728,10 @@
       "default": 100,
       "description": "Debouce time for input change on interactive mode."
     },
-    "list.maxHeight": {
+    "list.height": {
       "type": "number",
       "default": 10,
-      "description": "Maximum height of list window."
-    },
-    "list.minHeight": {
-      "type": "number",
-      "default": 1,
-      "description": "Minimum height of list window."
+      "description": "Height of split list window."
     },
     "list.signOffset": {
       "type": "number",
@@ -747,11 +747,6 @@
       "type": "boolean",
       "default": true,
       "description": "Enable extended search mode which allows multiple search patterns delimited by spaces."
-    },
-    "list.autoResize": {
-      "type": "boolean",
-      "default": true,
-      "description": "Enable auto resize feature."
     },
     "list.limitLines": {
       "type": "number",

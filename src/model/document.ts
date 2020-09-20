@@ -229,7 +229,6 @@ export default class Document {
 
   private _fireContentChanges(): void {
     let { textDocument } = this
-    // if (paused && !force) return
     let { cursor } = events
     try {
       let content = this.getDocumentContent()
@@ -335,7 +334,7 @@ export default class Document {
   }
 
   /**
-   * Force emit change event when necessary.
+   * Force document synchronize and emit change event when necessary.
    */
   public forceSync(): void {
     this.fireContentChanges.clear()
@@ -553,7 +552,6 @@ export default class Document {
       this.nvim.call('matchaddpos', [hlGroup, grouped, priority, id], true)
       res.push(id)
     }
-    this.nvim.call('coc#util#add_matchids', [res], true)
     return res
   }
 
@@ -607,7 +605,7 @@ export default class Document {
    */
   public clearMatchIds(ids: Set<number> | number[]): void {
     if (this.env.isVim && !this.env.textprop) {
-      this.nvim.call('coc#util#clearmatches', [Array.from(ids)], true)
+      this.nvim.call('coc#util#clear_buf_matches', [Array.from(ids), this.bufnr], true)
     } else {
       ids = distinct(Array.from(ids))
       let hasNamesapce = this.nvim.hasFunction('nvim_create_namespace')

@@ -127,7 +127,6 @@ class Languages {
   }
 
   private loadCompleteConfig(): void {
-    let config = workspace.getConfiguration('coc.preferences')
     let suggest = workspace.getConfiguration('suggest')
     let labels = suggest.get<{ [key: string]: string }>('completionItemKindLabels', {})
     this.completionItemKindMap = new Map([
@@ -281,53 +280,45 @@ class Languages {
     return this.signatureManager.shouldTrigger(document, triggerCharacter)
   }
 
-  @check
-  public async getHover(document: TextDocument, position: Position): Promise<Hover[]> {
-    return await this.hoverManager.provideHover(document, position, this.token)
+  public async getHover(document: TextDocument, position: Position, token: CancellationToken): Promise<Hover[]> {
+    return await this.hoverManager.provideHover(document, position, token)
   }
 
   public async getSignatureHelp(document: TextDocument, position: Position, token: CancellationToken): Promise<SignatureHelp> {
     return await this.signatureManager.provideSignatureHelp(document, position, token)
   }
 
-  @check
-  public async getDefinition(document: TextDocument, position: Position): Promise<Location[]> {
+  public async getDefinition(document: TextDocument, position: Position, token: CancellationToken): Promise<Location[]> {
     if (!this.definitionManager.hasProvider(document)) return null
-    return await this.definitionManager.provideDefinition(document, position, this.token)
+    return await this.definitionManager.provideDefinition(document, position, token)
   }
 
-  @check
-  public async getDeclaration(document: TextDocument, position: Position): Promise<Location[] | Location | LocationLink[] | null> {
+  public async getDeclaration(document: TextDocument, position: Position, token: CancellationToken): Promise<Location[] | Location | LocationLink[] | null> {
     if (!this.declarationManager.hasProvider(document)) return null
-    return await this.declarationManager.provideDeclaration(document, position, this.token)
+    return await this.declarationManager.provideDeclaration(document, position, token)
   }
 
-  @check
-  public async getTypeDefinition(document: TextDocument, position: Position): Promise<Location[]> {
+  public async getTypeDefinition(document: TextDocument, position: Position, token: CancellationToken): Promise<Location[]> {
     if (!this.typeDefinitionManager.hasProvider(document)) return null
-    return await this.typeDefinitionManager.provideTypeDefinition(document, position, this.token)
+    return await this.typeDefinitionManager.provideTypeDefinition(document, position, token)
   }
 
-  @check
-  public async getImplementation(document: TextDocument, position: Position): Promise<Location[]> {
+  public async getImplementation(document: TextDocument, position: Position, token: CancellationToken): Promise<Location[]> {
     if (!this.implementationManager.hasProvider(document)) return null
-    return await this.implementationManager.provideReferences(document, position, this.token)
+    return await this.implementationManager.provideReferences(document, position, token)
   }
 
-  @check
-  public async getReferences(document: TextDocument, context: ReferenceContext, position: Position): Promise<Location[]> {
+  public async getReferences(document: TextDocument, context: ReferenceContext, position: Position, token: CancellationToken): Promise<Location[]> {
     if (!this.referenceManager.hasProvider(document)) return null
-    return await this.referenceManager.provideReferences(document, position, context, this.token)
+    return await this.referenceManager.provideReferences(document, position, context, token)
   }
 
-  @check
-  public async getDocumentSymbol(document: TextDocument): Promise<SymbolInformation[] | DocumentSymbol[]> {
-    return await this.documentSymbolManager.provideDocumentSymbols(document, this.token)
+  public async getDocumentSymbol(document: TextDocument, token: CancellationToken): Promise<SymbolInformation[] | DocumentSymbol[]> {
+    return await this.documentSymbolManager.provideDocumentSymbols(document, token)
   }
 
-  @check
-  public async getSelectionRanges(document: TextDocument, positions: Position[]): Promise<SelectionRange[] | null> {
-    return await this.selectionRangeManager.provideSelectionRanges(document, positions, this.token)
+  public async getSelectionRanges(document: TextDocument, positions: Position[], token): Promise<SelectionRange[] | null> {
+    return await this.selectionRangeManager.provideSelectionRanges(document, positions, token)
   }
 
   @check
@@ -373,7 +364,7 @@ class Languages {
   }
 
   /**
-   * Get CodeAction list for current document
+   * Get CodeAction list for document
    *
    * @public
    * @param {TextDocument} document
@@ -389,9 +380,8 @@ class Languages {
     return await this.codeActionManager.provideCodeActions(document, range, context, this.token)
   }
 
-  @check
-  public async getDocumentHighLight(document: TextDocument, position: Position): Promise<DocumentHighlight[]> {
-    return await this.documentHighlightManager.provideDocumentHighlights(document, position, this.token)
+  public async getDocumentHighLight(document: TextDocument, position: Position, token: CancellationToken): Promise<DocumentHighlight[]> {
+    return await this.documentHighlightManager.provideDocumentHighlights(document, position, token)
   }
 
   @check
@@ -407,9 +397,8 @@ class Languages {
     return await this.documentLinkManager.resolveDocumentLink(link, this.token)
   }
 
-  @check
-  public async provideDocumentColors(document: TextDocument): Promise<ColorInformation[] | null> {
-    return await this.documentColorManager.provideDocumentColors(document, this.token)
+  public async provideDocumentColors(document: TextDocument, token: CancellationToken): Promise<ColorInformation[] | null> {
+    return await this.documentColorManager.provideDocumentColors(document, token)
   }
 
   @check
@@ -435,9 +424,13 @@ class Languages {
     return await this.codeLensManager.resolveCodeLens(codeLens, this.token)
   }
 
-  @check
-  public async provideDocumentOnTypeEdits(character: string, document: TextDocument, position: Position): Promise<TextEdit[] | null> {
-    return this.onTypeFormatManager.onCharacterType(character, document, position, this.token)
+  public async provideDocumentOnTypeEdits(
+    character: string,
+    document: TextDocument,
+    position: Position,
+    token: CancellationToken
+  ): Promise<TextEdit[] | null> {
+    return this.onTypeFormatManager.onCharacterType(character, document, position, token)
   }
 
   public hasOnTypeProvider(character: string, document: TextDocument): boolean {

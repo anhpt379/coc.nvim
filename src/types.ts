@@ -9,10 +9,13 @@ import Document from './model/document'
 import FileSystemWatcher from './model/fileSystemWatcher'
 import { ProviderResult, TextDocumentContentProvider } from './provider'
 import * as protocol from 'vscode-languageserver-protocol'
-import { ParsedUrlQueryInput } from 'querystring'
 
 export type MsgTypes = 'error' | 'warning' | 'more'
 export type ExtensionState = 'disabled' | 'loaded' | 'activated' | 'unknown'
+
+export interface ParsedUrlQueryInput {
+  [key: string]: unknown
+}
 
 export interface CodeAction extends protocol.CodeAction {
   clientId?: string
@@ -39,9 +42,21 @@ export interface Documentation {
 }
 
 export interface KeymapOption {
+  /**
+   * Use request instead of notify, default true
+   */
   sync: boolean
+  /**
+   * Cancel completion before invoke callback, default true
+   */
   cancel: boolean
+  /**
+   * Use <silent> for keymap, default false
+   */
   silent: boolean
+  /**
+   * Enable repeat support for repeat.vim, default false
+   */
   repeat: boolean
 }
 
@@ -816,6 +831,7 @@ export interface AnsiHighlight {
 export interface ListItemsEvent {
   items: ListItem[]
   highlights: ListHighlights[]
+  finished: boolean
   append?: boolean
   reload?: boolean
 }
@@ -835,7 +851,6 @@ export interface ListOptions {
   autoPreview: boolean
   numberSelect: boolean
   noQuit: boolean
-  noResize: boolean
   first: boolean
 }
 
@@ -956,9 +971,12 @@ export interface FetchOptions {
 
 export interface DownloadOptions extends FetchOptions {
   /**
-   * Folder contains downloaded file or extracted files by untar or unzip
+   * Folder that contains downloaded file or extracted files by untar or unzip
    */
   dest: string
+  /**
+   * If true, use untar for `.tar.gz` filename
+   */
   extract?: boolean | 'untar' | 'unzip'
   onProgress?: (percent: string) => void
 }
