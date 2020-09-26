@@ -1,7 +1,8 @@
 import { NeovimClient as Neovim } from '@chemzqm/neovim'
 import { EventEmitter } from 'events'
 import path from 'path'
-import { CodeActionKind } from 'vscode-languageserver-types'
+import { CancellationTokenSource, CodeActionKind } from 'vscode-languageserver-protocol'
+import { URI } from 'vscode-uri'
 import commandManager from './commands'
 import completion from './completion'
 import Cursors from './cursors'
@@ -16,7 +17,6 @@ import sources from './sources'
 import { Autocmd, OutputChannel, PatternType } from './types'
 import { CONFIG_FILE_NAME } from './util'
 import workspace from './workspace'
-import { URI } from 'vscode-uri'
 const logger = require('./util/logger')('plugin')
 
 export default class Plugin extends EventEmitter {
@@ -40,7 +40,6 @@ export default class Plugin extends EventEmitter {
     this.addAction('listLoadItems', async (name: string) => await listManager.loadItems(name))
     this.addAction('search', (...args: string[]) => this.handler.search(args))
     this.addAction('cursorsSelect', (bufnr: number, kind: string, mode: string) => this.cursors.select(bufnr, kind, mode))
-    this.addAction('codeActionRange', (start, end, only) => this.handler.codeActionRange(start, end, only))
     this.addAction('fillDiagnostics', (bufnr: number) => diagnosticManager.setLocationlist(bufnr))
     this.addAction('getConfig', async key => {
       let document = await workspace.document
@@ -270,11 +269,9 @@ export default class Plugin extends EventEmitter {
     this.addAction('rename', newName => {
       return this.handler.rename(newName)
     })
-    this.addAction('getWorkspaceSymbols', async (input: string, bufnr: number) => {
-      if (!bufnr) bufnr = await this.nvim.eval('bufnr("%")') as number
-      let document = workspace.getDocument(bufnr)
-      if (!document) return
-      return await languages.getWorkspaceSymbols(document.textDocument, input)
+    this.addAction('getWorkspaceSymbols', async (input: string) => {
+      let tokenSource = new CancellationTokenSource()
+      return await languages.getWorkspaceSymbols(input, tokenSource.token)
     })
     this.addAction('formatSelected', mode => {
       return this.handler.documentRangeFormatting(mode)
