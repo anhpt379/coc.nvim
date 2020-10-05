@@ -8,6 +8,7 @@ import os from 'os'
 import path from 'path'
 import rimraf from 'rimraf'
 import util from 'util'
+import semver from 'semver'
 import { v1 as uuid } from 'uuid'
 import { CancellationTokenSource, CreateFile, CreateFileOptions, DeleteFile, DeleteFileOptions, Disposable, DocumentSelector, Emitter, Event, FormattingOptions, Location, LocationLink, Position, Range, RenameFile, RenameFileOptions, TextDocumentEdit, TextDocumentSaveReason, WorkspaceEdit, WorkspaceFolder, WorkspaceFoldersChangeEvent, TextEdit } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
@@ -19,6 +20,7 @@ import events from './events'
 import DB from './model/db'
 import Document from './model/document'
 import FileSystemWatcher from './model/fileSystemWatcher'
+import Menu from './model/menu'
 import Mru from './model/mru'
 import BufferChannel from './model/outputChannel'
 import Resolver from './model/resolver'
@@ -54,6 +56,7 @@ export class Workspace implements IWorkspace {
   private messageLevel: MessageLevel
   private willSaveUntilHandler: WillSaveUntilHandler
   private statusLine: StatusLine
+  private menu: Menu
   private _insertMode = false
   private _env: Env
   private _root: string
@@ -118,6 +121,7 @@ export class Workspace implements IWorkspace {
     this.statusLine = new StatusLine(nvim)
     this._env = await nvim.call('coc#util#vim_info') as Env
     this._insertMode = this._env.mode.startsWith('insert')
+    this.menu = new Menu(nvim, this._env)
     let preferences = this.getConfiguration('coc.preferences')
     let maxFileSize = preferences.get<string>('maxFileSize', '10MB')
     this.maxFileSize = bytes.parse(maxFileSize)
@@ -1238,6 +1242,24 @@ export class Workspace implements IWorkspace {
    * Show quickpick
    */
   public async showQuickpick(items: string[], placeholder = 'Choose by number'): Promise<number> {
+    let preferences = this.getConfiguration('coc.preferences')
+    let floatQuickpick = preferences.get<boolean>('floatQuickpick', true)
+    if (floatQuickpick && this.floatSupported) {
+      let { menu } = this
+      menu.show(items)
+      let res = await new Promise<number>(resolve => {
+        let disposables: Disposable[] = []
+        menu.onDidCancel(() => {
+          disposeAll(disposables)
+          resolve(-1)
+        }, null, disposables)
+        menu.onDidChoose(idx => {
+          disposeAll(disposables)
+          resolve(idx)
+        }, null, disposables)
+      })
+      return res
+    }
     let release = await this.mutex.acquire()
     try {
       let title = placeholder + ':'
@@ -1278,6 +1300,45 @@ export class Workspace implements IWorkspace {
    */
   public async requestInput(title: string, defaultValue?: string): Promise<string> {
     let { nvim } = this
+    const preferences = this.getConfiguration('coc.preferences')
+    if (this.isNvim && semver.gte(this.env.version, '0.5.0') && preferences.get<boolean>('promptInput', true)) {
+      let bufnr = await nvim.call('coc#util#create_prompt_win', [title, defaultValue || ''])
+      if (!bufnr) return null
+      let res = await new Promise<string>(resolve => {
+        let disposables: Disposable[] = []
+        events.on('BufUnload', nr => {
+          if (nr == bufnr) {
+            disposeAll(disposables)
+            resolve(null)
+          }
+        }, null, disposables)
+        events.on('InsertLeave', nr => {
+          if (nr == bufnr) {
+            disposeAll(disposables)
+            setTimeout(() => {
+              nvim.command(`bd! ${nr}`, true)
+            }, 30)
+            resolve(null)
+          }
+        }, null, disposables)
+        events.on('PromptInsert', (value, nr) => {
+          if (nr == bufnr) {
+            disposeAll(disposables)
+            // connection would be broken without timeout, don't know why
+            setTimeout(() => {
+              nvim.command(`stopinsert|bd! ${nr}`, true)
+            }, 30)
+            if (!value) {
+              this.showMessage('Empty word, canceled', 'warning')
+              resolve(null)
+            } else {
+              resolve(value)
+            }
+          }
+        }, null, disposables)
+      })
+      return res
+    }
     let res = await this.callAsync<string>('input', [title + ': ', defaultValue || ''])
     nvim.command('normal! :<C-u>', true)
     if (!res) {

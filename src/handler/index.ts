@@ -368,6 +368,7 @@ export default class Handler {
         doc.matchAddRanges([hover.range], 'CocHoverRange', 999)
         setTimeout(() => {
           this.nvim.call('coc#util#clear_pos_matches', ['^CocHoverRange', winid], true)
+          if (workspace.isVim) this.nvim.command('redraw', true)
         }, 1000)
       }
       await this.previewHover(hovers)
@@ -425,7 +426,7 @@ export default class Handler {
   public async gotoReferences(openCommand?: string): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
     let token = this.getRequestToken('references')
-    let locs = await languages.getReferences(document, { includeDeclaration: false }, position, token)
+    let locs = await languages.getReferences(document, { includeDeclaration: true }, position, token)
     if (token.isCancellationRequested) return false
     if (this.checkEmpty('references', locs)) return false
     await this.handleLocations(locs, openCommand)
@@ -517,16 +518,16 @@ export default class Handler {
     let statusItem = this.requestStatusItem
     let position = await workspace.getCursorPosition()
     if (!languages.hasProvider('rename', doc.textDocument)) {
-      workspace.showMessage(`Rename provider not found for current document`, 'error')
+      workspace.showMessage(`Rename provider not found for current document`, 'warning')
       return false
     }
-    let token = this.getRequestToken('rename')
     await synchronizeDocument(doc)
     try {
+      let token = (new CancellationTokenSource()).token
       let res = await languages.prepareRename(doc.textDocument, position, token)
       if (res === false) {
         statusItem.hide()
-        workspace.showMessage('Invalid position for renmame', 'error')
+        workspace.showMessage('Invalid position for renmame', 'warning')
         return false
       }
       if (token.isCancellationRequested) return false
@@ -539,8 +540,7 @@ export default class Handler {
         } else {
           curname = await nvim.eval('expand("<cword>")') as string
         }
-        newName = await workspace.callAsync<string>('input', ['New name: ', curname])
-        nvim.command('normal! :<C-u>', true)
+        newName = await workspace.requestInput('New name', curname)
       }
       if (!newName) {
         statusItem.hide()
@@ -707,14 +707,9 @@ export default class Handler {
       workspace.showMessage(`No${only ? ' ' + only : ''} code action available`, 'warning')
       return
     }
-    if (!only || codeActions.length > 1) {
-      let idx = await workspace.showQuickpick(codeActions.map(o => o.title))
-      if (idx == -1) return
-      let action = codeActions[idx]
-      if (action) await this.applyCodeAction(action)
-    } else {
-      await this.applyCodeAction(codeActions[0])
-    }
+    let idx = await workspace.showQuickpick(codeActions.map(o => o.title))
+    let action = codeActions[idx]
+    if (action) await this.applyCodeAction(action)
   }
 
   /**
@@ -1254,6 +1249,23 @@ export default class Handler {
     await workspace.selectRange(selectionRange.range)
   }
 
+  public async codeActionRange(start: number, end: number, only?: string): Promise<void> {
+    let doc = await workspace.document
+    if (!doc) return
+    await wait(10)
+    await synchronizeDocument(doc)
+    let line = doc.getline(end - 1)
+    let range = Range.create(start - 1, 0, end - 1, line.length)
+    let codeActions = await this.getCodeActions(doc.bufnr, range, only ? [only] : null)
+    if (!codeActions || codeActions.length == 0) {
+      workspace.showMessage(`No${only ? ' ' + only : ''} code action available`, 'warning')
+      return
+    }
+    let idx = await workspace.showQuickpick(codeActions.map(o => o.title))
+    let action = codeActions[idx]
+    if (action) await this.applyCodeAction(action)
+  }
+
   /**
    * Refactor of current symbol
    */
@@ -1268,7 +1280,7 @@ export default class Handler {
       if (token.isCancellationRequested) return
       if (res === false) {
         this.requestStatusItem.hide()
-        workspace.showMessage('Invalid position for rename', 'error')
+        workspace.showMessage('Invalid position for rename', 'warning')
         return
       }
       let edit = await languages.provideRenameEdits(doc.textDocument, position, 'NewName', token)

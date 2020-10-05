@@ -54,11 +54,7 @@ export class ListManager implements Disposable {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         let session = this.getSessionByWinid(winid)
-        if (session) {
-          this.prompt.start(session.listOptions)
-        } else {
-          this.prompt.cancel()
-        }
+        if (session) this.prompt.start(session.listOptions)
       }, 100)
     }, null, this.disposables)
     this.disposables.push(Disposable.create(() => {
@@ -300,6 +296,7 @@ export class ListManager implements Disposable {
 
   private async onInputChar(ch: string, charmod: number): Promise<void> {
     let { mode } = this.prompt
+    if (!this.lastSession || !this.lastSession.winid) return
     let mapped = this.charMap.get(ch)
     let now = Date.now()
     if (mapped == '<plug>' || now - this.plugTs < 2) {
@@ -311,9 +308,6 @@ export class ListManager implements Disposable {
       await this.cancel()
       return
     }
-    // console.log(123)
-    // console.log(mode)
-    // console.log(ch)
     try {
       if (mode == 'insert') {
         await this.onInsertInput(ch, charmod)
