@@ -423,10 +423,10 @@ export default class Handler {
     return true
   }
 
-  public async gotoReferences(openCommand?: string): Promise<boolean> {
+  public async gotoReferences(openCommand?: string, includeDeclaration = true): Promise<boolean> {
     let { document, position } = await workspace.getCurrentState()
     let token = this.getRequestToken('references')
-    let locs = await languages.getReferences(document, { includeDeclaration: true }, position, token)
+    let locs = await languages.getReferences(document, { includeDeclaration }, position, token)
     if (token.isCancellationRequested) return false
     if (this.checkEmpty('references', locs)) return false
     await this.handleLocations(locs, openCommand)
@@ -814,8 +814,8 @@ export default class Handler {
   }
 
   public async highlight(): Promise<void> {
-    let [bufnr, arr] = await this.nvim.eval('[bufnr("%"),coc#util#cursor()]') as [number, [number, number]]
-    await this.documentHighlighter.highlight(bufnr, Position.create(arr[0], arr[1]))
+    let [bufnr, arr, winid] = await this.nvim.eval('[bufnr("%"),coc#util#cursor(),win_getid()]') as [number, [number, number], number]
+    await this.documentHighlighter.highlight(bufnr, winid, Position.create(arr[0], arr[1]))
   }
 
   public async getSymbolsRanges(): Promise<Range[]> {
