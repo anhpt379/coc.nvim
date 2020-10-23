@@ -50,37 +50,38 @@ export default class Floating {
     if (!config || token.isCancellationRequested) return
     await this.floatBuffer.setDocuments(docs, config.width)
     if (token.isCancellationRequested) return
-    let res = await nvim.call('coc#util#create_float_win', [this.winid, this.bufnr, config])
-    if (!res) return
-    let winid = this.winid = res[0]
-    let bufnr = this.bufnr = res[1]
+    nvim.pauseNotification()
+    nvim.call('coc#util#pumvisible', [], true)
+    nvim.call('coc#float#create_float_win', [this.winid, this.bufnr, Object.assign({ autohide: true }, config)], true)
+    let res = await nvim.resumeNotification()
+    if (Array.isArray(res[1])) return
+    let winid = this.winid = res[0][1][0]
+    let bufnr = this.bufnr = res[0][1][1]
     if (token.isCancellationRequested) {
       this.close()
       return
     }
     nvim.pauseNotification()
+    nvim.call('coc#util#pumvisible', [], true)
     if (workspace.isNvim) {
       nvim.call('coc#util#win_gotoid', [winid], true)
       this.floatBuffer.setLines(bufnr)
       nvim.command('noa normal! gg0', true)
+      nvim.call('coc#float#nvim_scrollbar', [winid], true)
       nvim.command('noa wincmd p', true)
     } else {
       this.floatBuffer.setLines(bufnr, winid)
       nvim.call('win_execute', [winid, `noa normal! gg0`], true)
       nvim.command('redraw', true)
     }
-    let result = await nvim.resumeNotification()
-    if (Array.isArray(result[1]) && result[1][0] == 0) {
-      // invalid window
-      this.winid = null
-    }
+    await nvim.resumeNotification()
   }
 
   public close(): void {
     if (!this.winid) return
     let { winid } = this
     this.winid = null
-    workspace.nvim.call('coc#util#close_win', [winid], true)
+    workspace.nvim.call('coc#float#close', [winid], true)
     if (workspace.isVim) workspace.nvim.command('redraw', true)
   }
 
@@ -94,7 +95,11 @@ export default class Floating {
     if (bounding.col > paddingRight) showRight = false
     let maxWidth = showRight ? paddingRight - 1 : bounding.col - 1
     maxWidth = Math.min(maxPreviewWidth, maxWidth)
-    let maxHeight = lines - bounding.row - workspace.env.cmdheight - 1
+    let maxHeight = lines - bounding.row - 2
+    if (maxHeight <= 0) {
+      logger.error(`Invalid count for &lines: ${lines} - ${bounding.row}`)
+      return null
+    }
     let { width, height } = FloatBuffer.getDimension(docs, maxWidth, maxHeight)
     if (width == 0 || height == 0) return null
     return {

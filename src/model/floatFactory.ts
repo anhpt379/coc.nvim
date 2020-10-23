@@ -7,7 +7,6 @@ import { Documentation, Env } from '../types'
 import { disposeAll, wait } from '../util'
 import { Mutex } from '../util/mutex'
 import { equals } from '../util/object'
-import { byteLength } from '../util/string'
 import FloatBuffer from './floatBuffer'
 const logger = require('../util/logger')('model-float')
 
@@ -19,6 +18,26 @@ export interface WindowConfig {
   relative: 'cursor' | 'win' | 'editor'
   style?: string
   cursorline?: number
+  title?: string
+  border?: number[]
+  autohide?: number
+  close?: number
+}
+
+export interface FloatWinConfig {
+  allowSelection?: boolean
+  offsetX?: number
+  title?: string
+  border?: number[]
+  cursorline?: boolean
+  close?: boolean
+  preferTop?: boolean
+}
+
+export interface ViewportConfig {
+  lines: number
+  columns: number
+  cmdheight: number
 }
 
 // factory class for floating window
@@ -39,8 +58,7 @@ export default class FloatFactory extends EventEmitter implements Disposable {
     private preferTop = false,
     private maxHeight = 999,
     private maxWidth?: number,
-    private autoHide = true,
-    private cursorline = false) {
+    private autoHide = true) {
     super()
     this.mutex = new Mutex()
     this.floatBuffer = new FloatBuffer(nvim)
@@ -89,37 +107,9 @@ export default class FloatFactory extends EventEmitter implements Disposable {
     }
   }
 
-  private getWindowConfig(docs: Documentation[], win_position: [number, number], offsetX = 0): WindowConfig {
-    let { columns } = this.env
-    let lines = this.env.lines - this.env.cmdheight - 1
-    let { preferTop } = this
-    let alignTop = false
-    let [row, col] = win_position
-    let max = this.getMaxWindowHeight(docs)
-    if (preferTop && row >= max) {
-      alignTop = true
-    } else if (!preferTop && lines - row - 1 >= max) {
-      alignTop = false
-    } else if ((preferTop && row >= 3) || (!preferTop && row >= lines - row - 1)) {
-      alignTop = true
-    }
-    let maxHeight = alignTop ? row : lines - row - 1
-    maxHeight = Math.min(maxHeight, this.maxHeight || lines)
-    let maxWidth = Math.min(this.maxWidth || 80, 80, columns)
-    let { width, height } = FloatBuffer.getDimension(docs, maxWidth, maxHeight)
-    if (col - offsetX + width > columns) {
-      offsetX = col + width - columns
-    }
-    this.alignTop = alignTop
-    return {
-      height,
-      width,
-      row: alignTop ? - height : 1,
-      col: offsetX == 0 ? 0 : - offsetX,
-      relative: 'cursor'
-    }
-  }
-
+  /**
+   * @deprecated use show method instead
+   */
   public async create(docs: Documentation[], allowSelection = false, offsetX = 0): Promise<void> {
     let { floating, textprop } = this.env
     if (!floating && !textprop) return
@@ -131,45 +121,81 @@ export default class FloatFactory extends EventEmitter implements Disposable {
     this.cancel()
     let release = await this.mutex.acquire()
     try {
-      await this.createPopup(docs, allowSelection, offsetX)
+      await this.createPopup(docs, { allowSelection, offsetX })
       release()
     } catch (e) {
+      release()
       logger.error(`Error on create popup:`, e.message)
       this.close()
-      release()
     }
   }
 
-  private async createPopup(docs: Documentation[], allowSelection = false, offsetX = 0): Promise<void> {
+  public async show(docs: Documentation[], config: FloatWinConfig = {}): Promise<void> {
+    let { floating, textprop } = this.env
+    if (!floating && !textprop) return
+    this.onCursorMoved.clear()
+    if (docs.length == 0 || docs.every(doc => doc.content.length == 0)) {
+      this.close()
+      return
+    }
+    this.cancel()
+    let release = await this.mutex.acquire()
+    try {
+      await this.createPopup(docs, config)
+      release()
+    } catch (e) {
+      release()
+      logger.error(`Error on create popup:`, e.message)
+      this.close()
+    }
+  }
+
+  private async createPopup(docs: Documentation[], opts: FloatWinConfig): Promise<void> {
     let tokenSource = this.tokenSource = new CancellationTokenSource()
     let token = tokenSource.token
-    let { nvim, alignTop, pumAlignTop, floatBuffer } = this
+    let { nvim, floatBuffer } = this
+    let lines = FloatBuffer.getLines(docs, !this.env.isVim)
     // get options
-    let arr = await this.nvim.call('coc#util#get_float_mode', [allowSelection, alignTop, pumAlignTop])
+    let arr = await this.nvim.call('coc#float#get_float_mode', [lines, {
+      allowSelection: opts.allowSelection || false,
+      pumAlignTop: this.pumAlignTop,
+      preferTop: typeof opts.preferTop === 'boolean' ? opts.preferTop : this.preferTop,
+      maxWidth: this.maxWidth || 80,
+      maxHeight: this.maxHeight,
+      offsetX: opts.offsetX || 0
+    }])
     if (!arr || token.isCancellationRequested) return
-    let [mode, targetBufnr, win_position, cursor] = arr
+    let [mode, targetBufnr, cursor, config] = arr
     this.targetBufnr = targetBufnr
     this.cursor = cursor
-    let config = this.getWindowConfig(docs, win_position, offsetX)
-    if (this.env.isVim && this.cursorline) {
-      config.cursorline = 1
+    config.relative = 'cursor'
+    if (opts.cursorline) config.cursorline = 1
+    if (this.autoHide) config.autohide = 1
+    if (opts.title || opts.border != null) {
+      config.title = opts.title || ''
+      config.border = opts.border || [1, 1, 1, 1]
+      if (config.border.length == 0) {
+        config.border = [1, 1, 1, 1]
+      }
     }
+    config.close = opts.close ? 1 : 0
     // calculat highlights
     await floatBuffer.setDocuments(docs, config.width)
     if (token.isCancellationRequested) return
     if (mode == 's') nvim.call('feedkeys', ['\x1b', "in"], true)
     // create window
-    let res = await this.nvim.call('coc#util#create_float_win', [this.winid, this._bufnr, config])
+    let res = await this.nvim.call('coc#float#create_float_win', [this.winid, this._bufnr, config])
     if (!res) return
     this.onCursorMoved.clear()
     let winid = this.winid = res[0] as number
-    let bufnr = this._bufnr = res[1]
+    let bufnr = this._bufnr = res[1] as number
     if (token.isCancellationRequested) return
     nvim.pauseNotification()
     if (!this.env.isVim) {
       nvim.call('coc#util#win_gotoid', [winid], true)
       this.floatBuffer.setLines(bufnr)
       nvim.command(`noa normal! gg0`, true)
+      nvim.call('coc#float#nvim_scrollbar', [winid], true)
       nvim.command('noa wincmd p', true)
     } else {
       // no need to change cursor position
@@ -194,13 +220,16 @@ export default class FloatFactory extends EventEmitter implements Disposable {
    * Close float window
    */
   public close(): void {
-    let { winid } = this
+    let { winid, nvim } = this
     this.cancel()
     if (winid) {
       // TODO: sometimes this won't work at all
-      this.nvim.call('coc#util#close_win', [winid], true)
+      nvim.pauseNotification()
       this.winid = 0
+      nvim.call('coc#float#close', [winid], true)
       if (this.env.isVim) this.nvim.command('redraw', true)
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      nvim.resumeNotification(false, true)
     }
   }
 
@@ -231,23 +260,6 @@ export default class FloatFactory extends EventEmitter implements Disposable {
 
   public async activated(): Promise<boolean> {
     if (!this.winid) return false
-    return await this.nvim.call('coc#util#valid_float_win', [this.winid]) != 0
-  }
-
-  private getMaxWindowHeight(docs: Documentation[]): number {
-    let maxWidth = Math.min(this.maxWidth || 80, 80, this.env.columns)
-    let w = maxWidth - 2
-    let h = 0
-    for (let doc of docs) {
-      let lines = doc.content.split(/\r?\n/)
-      for (let s of lines) {
-        if (s.length == 0) {
-          h = h + 1
-        } else {
-          h = h + Math.ceil(byteLength(s.replace(/\t/g, '  ')) / w)
-        }
-      }
-    }
-    return Math.min(this.maxHeight, h)
+    return await this.nvim.call('coc#float#valid', [this.winid]) != 0
   }
 }

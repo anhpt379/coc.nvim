@@ -81,7 +81,7 @@ export class Helper extends EventEmitter {
   public async waitFloat(): Promise<number> {
     for (let i = 0; i < 40; i++) {
       await this.wait(50)
-      let winid = await this.nvim.call('coc#util#get_float')
+      let winid = await this.nvim.call('coc#float#get_float_win')
       if (winid) return winid
     }
     throw new Error('timeout after 2s')
@@ -210,6 +210,12 @@ export class Helper extends EventEmitter {
       if (f) floatWin = win
     }
     return floatWin
+  }
+
+  public async getFloats(): Promise<Window[]> {
+    let ids = await this.nvim.call('coc#float#get_float_win_list', [])
+    if (!ids) return []
+    return ids.map(id => this.nvim.createWindow(id))
   }
 }
 

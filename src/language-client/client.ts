@@ -920,9 +920,9 @@ export interface DynamicFeature<T> {
 }
 
 export interface NotificationFeature<T extends Function> {
-	/**
-	 * Triggers the corresponding RPC method.
-	 */
+  /**
+   * Triggers the corresponding RPC method.
+   */
   getProvider(document: TextDocument): { send: T }
 }
 
@@ -1656,9 +1656,9 @@ interface TextDocumentFeatureRegistration<RO, PR> {
 }
 
 export interface TextDocumentProviderFeature<T> {
-	/**
-	 * Triggers the corresponding RPC method.
-	 */
+  /**
+   * Triggers the corresponding RPC method.
+   */
   getProvider(textDocument: TextDocument): T
 }
 
@@ -1686,8 +1686,7 @@ export abstract class TextDocumentFeature<
   public register(message: RPCMessageType, data: RegistrationData<RO>): void {
     if (message.method !== this.messages.method) {
       throw new Error(
-        `Register called on wrong feature. Requested ${
-        message.method
+        `Register called on wrong feature. Requested ${message.method
         } but reached feature ${this.messages.method}`
       )
     }
@@ -1816,7 +1815,7 @@ class CompletionItemFeature extends TextDocumentFeature<CompletionOptions, Compl
     completion.completionItem = {
       snippetSupport,
       commitCharactersSupport: true,
-      documentationFormat: [MarkupKind.Markdown, MarkupKind.PlainText],
+      documentationFormat: this._client.supporedMarkupKind,
       deprecatedSupport: true,
       preselectSupport: true,
       // tagSupport: { valueSet: [CompletionItemTag.Deprecated] },
@@ -1911,7 +1910,7 @@ class HoverFeature extends TextDocumentFeature<
       'hover'
     )!
     hoverCapability.dynamicRegistration = true
-    hoverCapability.contentFormat = [MarkupKind.Markdown, MarkupKind.PlainText]
+    hoverCapability.contentFormat = this._client.supporedMarkupKind
   }
 
   public initialize(
@@ -1968,7 +1967,7 @@ class SignatureHelpFeature extends TextDocumentFeature<
     config.dynamicRegistration = true
     // config.contextSupport = true // TODO context and meta support
     config.signatureInformation = {
-      documentationFormat: [MarkupKind.Markdown, MarkupKind.PlainText],
+      documentationFormat: this._client.supporedMarkupKind,
       parameterInformation: {
         labelOffsetSupport: true
       }
@@ -2805,7 +2804,7 @@ class ConfigurationFeature implements DynamicFeature<DidChangeConfigurationRegis
   }
 
   public initialize(): void {
-    let section = this._client.clientOptions.synchronize!.configurationSection
+    let section = this._client.clientOptions.synchronize?.configurationSection
     if (section !== void 0) {
       this.register(this.messages, {
         id: UUID.generateUuid(),
@@ -2822,8 +2821,14 @@ class ConfigurationFeature implements DynamicFeature<DidChangeConfigurationRegis
   ): void {
     let { section } = data.registerOptions
     let disposable = workspace.onDidChangeConfiguration((event) => {
+      if (typeof section == 'string' && !event.affectsConfiguration(section)) {
+        return
+      }
+      if (Array.isArray(section) && !section.some(v => event.affectsConfiguration(v))) {
+        return
+      }
       if (section != null) {
-        this.onDidChangeConfiguration(data.registerOptions.section, event)
+        this.onDidChangeConfiguration(data.registerOptions.section)
       }
     })
     this._listeners.set(data.id, disposable)
@@ -2832,7 +2837,8 @@ class ConfigurationFeature implements DynamicFeature<DidChangeConfigurationRegis
       if (!settings || Is.emptyObject(settings)) return
     }
     if (section != null) {
-      this.onDidChangeConfiguration(data.registerOptions.section, undefined)
+      // Avoid server bug
+      this.onDidChangeConfiguration(data.registerOptions.section)
     }
   }
 
@@ -2851,25 +2857,17 @@ class ConfigurationFeature implements DynamicFeature<DidChangeConfigurationRegis
     this._listeners.clear()
   }
 
-  private onDidChangeConfiguration(configurationSection: string | string[], event: ConfigurationChangeEvent | undefined): void {
+  private onDidChangeConfiguration(configurationSection: string | string[]): void {
+    let isConfigured = typeof configurationSection === 'string' && configurationSection.startsWith('languageserver.')
     let sections: string[] | undefined
     if (Is.string(configurationSection)) {
       sections = [configurationSection]
     } else {
       sections = configurationSection
     }
-    if (sections !== void 0 && event !== void 0) {
-      const affected = sections.some((section) => event.affectsConfiguration(section))
-      if (!affected) {
-        return
-      }
-    }
-    let isConfigured = sections.length == 1 && /^languageserver\..+\.settings$/.test(sections[0])
     let didChangeConfiguration = (sections: string[] | undefined): void => {
-      if (sections == null) {
-        this._client.sendNotification(DidChangeConfigurationNotification.type, {
-          settings: null
-        })
+      if (sections === undefined) {
+        this._client.sendNotification(DidChangeConfigurationNotification.type, { settings: null })
         return
       }
       this._client.sendNotification(DidChangeConfigurationNotification.type, {
@@ -2882,6 +2880,7 @@ class ConfigurationFeature implements DynamicFeature<DidChangeConfigurationRegis
       : didChangeConfiguration(sections)
   }
 
+  // for configured languageserver
   private getConfiguredSettings(key: string): any {
     let len = '.settings'.length
     let config = workspace.getConfiguration(key.slice(0, - len))
@@ -3039,6 +3038,7 @@ class OnReady {
 export abstract class BaseLanguageClient {
   private _id: string
   private _name: string
+  private _markdownSupport: boolean
   private _clientOptions: ResolvedClientOptions
 
   protected _state: ClientState
@@ -3123,7 +3123,14 @@ export abstract class BaseLanguageClient {
       }
     }
     this._syncedDocuments = new Map<string, TextDocument>()
+    let preferences = workspace.getConfiguration('coc.preferences')
+    this._markdownSupport = preferences.get('enableMarkdown', true)
     this.registerBuiltinFeatures()
+  }
+
+  public get supporedMarkupKind(): MarkupKind[] {
+    if (this._markdownSupport) return [MarkupKind.Markdown, MarkupKind.PlainText]
+    return [MarkupKind.PlainText]
   }
 
   private get state(): ClientState {
@@ -3217,8 +3224,7 @@ export abstract class BaseLanguageClient {
       this._resolvedConnection!.onRequest(type, handler)
     } catch (error) {
       this.error(
-        `Registering request handler ${
-        Is.string(type) ? type : type.method
+        `Registering request handler ${Is.string(type) ? type : type.method
         } failed.`,
         error
       )
@@ -3256,8 +3262,7 @@ export abstract class BaseLanguageClient {
       this._resolvedConnection!.onNotification(type, handler)
     } catch (error) {
       this.error(
-        `Registering notification handler ${
-        Is.string(type) ? type : type.method
+        `Registering notification handler ${Is.string(type) ? type : type.method
         } failed.`,
         error
       )
@@ -3342,8 +3347,7 @@ export abstract class BaseLanguageClient {
   private data2String(data: any): string {
     if (data instanceof ResponseError) {
       const responseError = data as ResponseError<any>
-      return `  Message: ${responseError.message}\n  Code: ${
-        responseError.code
+      return `  Message: ${responseError.message}\n  Code: ${responseError.code
         } ${responseError.data ? '\n' + responseError.data.toString() : ''}`
     }
     if (data instanceof Error) {
