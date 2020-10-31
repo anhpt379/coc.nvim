@@ -202,7 +202,6 @@ function! s:Disable() abort
   augroup coc_nvim
     autocmd!
   augroup end
-  call coc#util#close_floats()
   call coc#rpc#request('detach', [])
   echohl MoreMsg
     echom '[coc.nvim] Event disabled'
@@ -260,12 +259,14 @@ function! s:Enable(initialize)
       autocmd DirChanged        * call s:Autocmd('DirChanged', get(v:event, 'cwd', ''))
       autocmd TermOpen          * call s:Autocmd('TermOpen', +expand('<abuf>'))
       autocmd TermClose         * call s:Autocmd('TermClose', +expand('<abuf>'))
-      autocmd CursorMoved       * call coc#float#nvim_refresh_scrollbar()
-      autocmd WinEnter          * call coc#float#nvim_check_close(win_getid())
-      autocmd CursorHold        * call coc#float#nvim_check_related()
+      autocmd CursorMoved       * call coc#float#nvim_refresh_scrollbar(win_getid())
+      autocmd WinEnter          * call coc#float#nvim_win_enter(win_getid())
       if exists('##WinClosed')
-        autocmd WinClosed       * call coc#float#nvim_close_related(+expand('<afile>'))
+        autocmd WinClosed       * call coc#float#close_related(+expand('<afile>'))
       endif
+    endif
+    if has('nvim-0.4.3') || has('patch-8.1.1719')
+      autocmd CursorHold        * call coc#float#check_related()
     endif
     autocmd WinLeave            * call coc#util#clear_highlights()
     autocmd WinLeave            * call s:Autocmd('WinLeave', win_getid())
@@ -310,12 +311,12 @@ endfunction
 function! s:Hi() abort
   hi default CocUnderline    cterm=underline gui=underline
   hi default CocBold         term=bold cterm=bold gui=bold
-  hi default CocErrorSign    ctermfg=Red     guifg=#ff0000
-  hi default CocWarningSign  ctermfg=Brown   guifg=#ff922b
-  hi default CocInfoSign     ctermfg=Yellow  guifg=#fab005
-  hi default CocHintSign     ctermfg=Blue    guifg=#15aabf
-  hi default CocSelectedText ctermfg=Red     guifg=#fb4934
-  hi default CocCodeLens     ctermfg=Gray    guifg=#999999
+  hi default CocErrorSign    ctermfg=Red     guifg=#ff0000 guibg=NONE
+  hi default CocWarningSign  ctermfg=Brown   guifg=#ff922b guibg=NONE
+  hi default CocInfoSign     ctermfg=Yellow  guifg=#fab005 guibg=NONE
+  hi default CocHintSign     ctermfg=Blue    guifg=#15aabf guibg=NONE
+  hi default CocSelectedText ctermfg=Red     guifg=#fb4934 guibg=NONE
+  hi default CocCodeLens     ctermfg=Gray    guifg=#999999 guibg=NONE
   hi default link CocMenuSel          PmenuSel
   hi default link CocErrorFloat       CocErrorSign
   hi default link CocWarningFloat     CocWarningSign
@@ -456,8 +457,8 @@ nnoremap <silent> <Plug>(coc-references)            :<C-u>call       CocActionAs
 nnoremap <silent> <Plug>(coc-references-used)       :<C-u>call       CocActionAsync('jumpUsed')<CR>
 nnoremap <silent> <Plug>(coc-openlink)              :<C-u>call       CocActionAsync('openLink')<CR>
 nnoremap <silent> <Plug>(coc-fix-current)           :<C-u>call       CocActionAsync('doQuickfix')<CR>
-nnoremap <silent> <Plug>(coc-float-hide)            :<C-u>call       coc#util#float_hide()<CR>
-nnoremap <silent> <Plug>(coc-float-jump)            :<c-u>call       coc#util#float_jump()<cr>
+nnoremap <silent> <Plug>(coc-float-hide)            :<C-u>call       coc#float#close_all()<CR>
+nnoremap <silent> <Plug>(coc-float-jump)            :<c-u>call       coc#float#jump()<cr>
 nnoremap <silent> <Plug>(coc-command-repeat)        :<C-u>call       CocAction('repeatCommand')<CR>
 nnoremap <silent> <Plug>(coc-refactor)              :<C-u>call       CocActionAsync('refactor')<CR>
 inoremap <silent>                          <Plug>CocRefresh <C-r>=coc#_complete()<CR>

@@ -39,6 +39,8 @@ import { comparePosition, getChangedFromEdits } from './util/position'
 import { byteIndex, byteLength } from './util/string'
 import Watchman from './watchman'
 import { equals } from './util/object'
+import Dialog from './model/dialog'
+import { DialogConfig } from './types'
 
 const logger = require('./util/logger')('workspace')
 let NAME_SPACE = 1080
@@ -75,8 +77,8 @@ export class Workspace implements IWorkspace {
 
   private _dynAutocmd = false
   private _disposed = false
-  private _onDidOpenDocument = new Emitter<TextDocument>()
-  private _onDidCloseDocument = new Emitter<TextDocument>()
+  private _onDidOpenDocument = new Emitter<TextDocument & { bufnr: number }>()
+  private _onDidCloseDocument = new Emitter<TextDocument & { bufnr: number }>()
   private _onDidChangeDocument = new Emitter<DidChangeTextDocumentParams>()
   private _onWillSaveDocument = new Emitter<TextDocumentWillSaveEvent>()
   private _onDidSaveDocument = new Emitter<TextDocument>()
@@ -90,8 +92,8 @@ export class Workspace implements IWorkspace {
   public readonly onDidCloseTerminal: Event<Terminal> = this._onDidCloseTerminal.event
   public readonly onDidOpenTerminal: Event<Terminal> = this._onDidOpenTerminal.event
   public readonly onDidChangeWorkspaceFolders: Event<WorkspaceFoldersChangeEvent> = this._onDidChangeWorkspaceFolders.event
-  public readonly onDidOpenTextDocument: Event<TextDocument> = this._onDidOpenDocument.event
-  public readonly onDidCloseTextDocument: Event<TextDocument> = this._onDidCloseDocument.event
+  public readonly onDidOpenTextDocument: Event<TextDocument & { bufnr: number }> = this._onDidOpenDocument.event
+  public readonly onDidCloseTextDocument: Event<TextDocument & { bufnr: number }> = this._onDidCloseDocument.event
   public readonly onDidChangeTextDocument: Event<DidChangeTextDocumentParams> = this._onDidChangeDocument.event
   public readonly onWillSaveTextDocument: Event<TextDocumentWillSaveEvent> = this._onWillSaveDocument.event
   public readonly onDidSaveTextDocument: Event<TextDocument> = this._onDidSaveDocument.event
@@ -1253,7 +1255,7 @@ export class Workspace implements IWorkspace {
   public async menuPick(items: string[], title?: string): Promise<number> {
     if (this.floatSupported) {
       let { menu } = this
-      await menu.show(items, title)
+      menu.show(items, title)
       let res = await new Promise<number>(resolve => {
         let disposables: Disposable[] = []
         menu.onDidCancel(() => {
@@ -1276,9 +1278,9 @@ export class Workspace implements IWorkspace {
   public async showPrompt(title: string): Promise<boolean> {
     let release = await this.mutex.acquire()
     try {
-      let res = await this.nvim.callAsync('coc#util#prompt', [title])
+      let res = await this.nvim.callAsync('coc#float#prompt_confirm', [title])
       release()
-      return !!res
+      return res == 1
     } catch (e) {
       release()
       return false
@@ -1288,6 +1290,16 @@ export class Workspace implements IWorkspace {
   public async callAsync<T>(method: string, args: any[]): Promise<T> {
     if (this.isNvim) return await this.nvim.call(method, args)
     return await this.nvim.callAsync('coc#util#with_callback', [method, args])
+  }
+
+  public async showDiaglog(config: DialogConfig): Promise<Dialog | null> {
+    if (!this.env.dialog) {
+      this.showMessage('Dialog requires vim >= 8.2.0750 or neovim >= 0.4.3', 'warning')
+      return null
+    }
+    let dialog = new Dialog(this.nvim, config)
+    await dialog.show({})
+    return dialog
   }
 
   /**
@@ -1647,7 +1659,7 @@ augroup end`
     }
     if (!document || !document.textDocument) return
     this.buffers.set(bufnr, document)
-    if (document.enabled) {
+    if (document.attached) {
       document.onDocumentDetach(bufnr => {
         let doc = this.getDocument(bufnr)
         if (doc) this.onBufUnload(doc.bufnr)
@@ -1668,7 +1680,8 @@ augroup end`
       this.configurations.checkFolderConfiguration(document.uri)
     }
     if (document.enabled) {
-      this._onDidOpenDocument.fire(document.textDocument)
+      let textDocument: TextDocument & { bufnr: number } = Object.assign(document.textDocument, { bufnr })
+      this._onDidOpenDocument.fire(textDocument)
       document.onDocumentChange(e => this._onDidChangeDocument.fire(e))
     }
     logger.debug('buffer created', buffer.id)
@@ -1711,7 +1724,8 @@ augroup end`
     }
     let doc = this.buffers.get(bufnr)
     if (doc) {
-      this._onDidCloseDocument.fire(doc.textDocument)
+      let textDocument: TextDocument & { bufnr: number } = Object.assign(doc.textDocument, { bufnr })
+      this._onDidCloseDocument.fire(textDocument)
       this.buffers.delete(bufnr)
       doc.detach()
     }
@@ -1740,9 +1754,10 @@ augroup end`
     if (!doc) return
     let converted = doc.convertFiletype(filetype)
     if (converted == doc.filetype) return
-    this._onDidCloseDocument.fire(doc.textDocument)
+    let textDocument: TextDocument & { bufnr: number } = Object.assign(doc.textDocument, { bufnr })
+    this._onDidCloseDocument.fire(textDocument)
     doc.setFiletype(filetype)
-    this._onDidOpenDocument.fire(doc.textDocument)
+    this._onDidOpenDocument.fire(textDocument)
   }
 
   private async checkBuffer(bufnr: number): Promise<void> {

@@ -24,45 +24,53 @@ afterEach(async () => {
 
 describe('Menu', () => {
   it('should show menu', async () => {
-    await menu.show(['one', 'two', 'thr'])
-    await helper.wait(100)
+    menu.show(['one', 'two', 'thr'])
+    await helper.wait(150)
     let id = await nvim.call('coc#float#get_float_win')
     expect(id).toBeGreaterThan(0)
     let bufnr = await nvim.call('winbufnr', [id])
     let buf = nvim.createBuffer(bufnr)
     let lines = await buf.lines
     expect(lines).toEqual(['1. one', '2. two', '3. thr'])
+    menu.hide()
   })
 
   it('should cancel by <esc>', async () => {
     let fn = jest.fn()
-    await menu.show(['one', 'two', 'three'])
-    let disposable = menu.onDidCancel(() => {
-      disposable.dispose()
-      fn()
+    menu.show(['one', 'two', 'three'])
+    let promise = new Promise(resolve => {
+      let disposable = menu.onDidCancel(() => {
+        disposable.dispose()
+        fn()
+        resolve()
+      })
     })
-    await helper.wait(100)
+    await helper.wait(150)
     let id = await nvim.call('coc#float#get_float_win')
     expect(id).toBeGreaterThan(0)
     await nvim.input('<esc>')
-    await helper.wait(100)
+    await promise
     expect(fn).toBeCalled()
   })
 
   it('should select by CR', async () => {
     let cancelFn = jest.fn()
-    await menu.show(['one', 'two', 'three'])
+    menu.show(['one', 'two', 'three'])
     let selected: number
     let disposables: Disposable[] = []
-    disposables.push(menu.onDidCancel(() => {
-      cancelFn()
-    }))
-    disposables.push(menu.onDidChoose(n => {
-      selected = n
-    }))
+    let promise = new Promise(resolve => {
+      disposables.push(menu.onDidCancel(() => {
+        cancelFn()
+        resolve()
+      }))
+      disposables.push(menu.onDidChoose(n => {
+        selected = n
+        resolve()
+      }))
+    })
     await helper.wait(100)
     await nvim.input('<cr>')
-    await helper.wait(100)
+    await promise
     for (let disposable of disposables) {
       disposable.dispose()
     }
@@ -71,43 +79,37 @@ describe('Menu', () => {
   })
 
   it('should ignore invalid index', async () => {
-    await menu.show(['one', 'two', 'three'])
+    menu.show(['one', 'two', 'three'])
     let canceled = false
-    let disposables: Disposable[] = []
-    disposables.push(menu.onDidCancel(() => {
-      canceled = true
-    }))
-    await helper.wait(100)
-    await nvim.input('0')
-    await helper.wait(50)
-    await nvim.input('5')
-    await helper.wait(50)
-    await nvim.input('<esc>')
-    await helper.wait(50)
-    for (let disposable of disposables) {
+    let disposable = menu.onDidCancel(() => {
       disposable.dispose()
-    }
+      canceled = true
+    })
+    await helper.wait(100)
+    await nvim.input('05')
+    await helper.wait(50)
     expect(canceled).toBe(false)
+    menu.hide()
   })
 
   it('should select by index number', async () => {
-    await menu.show(['one', 'two', 'three'])
+    menu.show(['one', 'two', 'three'])
     let selected: number
-    let disposables: Disposable[] = []
-    disposables.push(menu.onDidChoose(n => {
-      selected = n
-    }))
+    let promise = new Promise(resolve => {
+      let disposable = menu.onDidChoose(n => {
+        disposable.dispose()
+        selected = n
+        resolve()
+      })
+    })
     await helper.wait(100)
     await nvim.input('2')
-    await helper.wait(100)
-    for (let disposable of disposables) {
-      disposable.dispose()
-    }
+    await promise
     expect(selected).toBe(1)
   })
 
   it('should navigate by j, k & G', async () => {
-    await menu.show(['one', 'two', 'three'])
+    menu.show(['one', 'two', 'three'])
     await helper.wait(100)
     let id = await nvim.call('coc#float#get_float_win')
     expect(id).toBeGreaterThan(0)
@@ -131,17 +133,20 @@ describe('Menu', () => {
 
   it('should select by numbers', async () => {
     let selected: number
-    await menu.show(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'])
-    let disposable = menu.onDidChoose(n => {
-      disposable.dispose()
-      selected = n
+    menu.show(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'])
+    let promise = new Promise(resolve => {
+      let disposable = menu.onDidChoose(n => {
+        disposable.dispose()
+        selected = n
+        resolve()
+      })
     })
     await helper.wait(100)
     nvim.call('feedkeys', ['1', 'in'], true)
     await helper.wait(50)
     nvim.call('coc#list#start_prompt', ['MenuInput'], true)
     nvim.call('feedkeys', ['0', 'in'], true)
-    await helper.wait(200)
+    await promise
     expect(selected).toBe(9)
   })
 })

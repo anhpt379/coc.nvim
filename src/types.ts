@@ -23,6 +23,48 @@ export interface ParsedUrlQueryInput {
   [key: string]: unknown
 }
 
+export interface DialogButton {
+  /**
+   * Use by callback, should >= 0
+   */
+  index: number
+  text: string
+  /**
+   * Not shown when true
+   */
+  disabled?: boolean
+}
+
+export interface DialogPreferences {
+  maxWidth?: number
+  maxHeight?: number
+}
+
+export interface DialogConfig {
+  content: string
+  title?: string
+  /**
+   * show close button, default to true when not specified.
+   */
+  close?: boolean
+  /**
+   * highlight group for dialog window,
+   */
+  highlight?: string
+  /**
+   * highlight groups for border, only first highlight works for now.
+   */
+  borderhighlight?: string[]
+  /**
+   * Buttons as bottom of dialog.
+   */
+  buttons?: DialogButton[]
+  /**
+   * index is -1 for window close without button click
+   */
+  callback?: (index: number) => void
+}
+
 export type DocumentChange = TextDocumentEdit | CreateFile | RenameFile | DeleteFile
 
 export interface CodeAction extends protocol.CodeAction {
@@ -293,6 +335,7 @@ export interface Env {
   readonly version: string
   readonly locationlist: boolean
   readonly progpath: string
+  readonly dialog: boolean
   readonly textprop: boolean
   readonly vimCommands: CommandConfig[]
 }

@@ -648,6 +648,16 @@
       "default": false,
       "description": "Separate related information as diagnostics"
     },
+    "diagnostic.showUnused": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show unused variables"
+    },
+    "diagnostic.showDeprecated": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show deprecated variables"
+    },
     "signature.enable": {
       "type": "boolean",
       "description": "Enable signature help when trigger character typed, require restart service on change.",
@@ -665,10 +675,16 @@
       "description": "Target of signature help, use float when possible by default.",
       "enum": ["float", "echo", "preview"]
     },
-    "signature.floatMaxWidth": {
+    "signature.maxWindowWidth": {
       "type": "integer",
-      "default": 60,
-      "description": "Max width of signature float window."
+      "default": 80,
+      "description": "Maximum width of signature float window (or popup on vim8)."
+    },
+    "signature.maxWindowHeight": {
+      "type": "number",
+      "description": "Maximum height of signature float window (or popup on vim8).",
+      "minimum": 3,
+      "default": 8
     },
     "signature.preferShownAbove": {
       "type": "boolean",
@@ -679,11 +695,6 @@
       "type": "boolean",
       "description": "Hide signature float window when text changed, require restart service on change.",
       "default": false
-    },
-    "signature.maxWindowHeight": {
-      "type": "number",
-      "description": "Maximum height of floating signature help window.",
-      "default": 8
     },
     "codeLens.enable": {
       "type": "boolean",
@@ -737,6 +748,21 @@
       "type": "number",
       "default": 10,
       "description": "Height of split list window."
+    },
+    "list.statusLineSegments": {
+      "type": ["array", "null"],
+      "default": [
+        "%#CocListMode#-- %{get(b:list_status, \"mode\", \"\")} --%*",
+        "%{get(b:list_status, \"loading\", \"\")}",
+        "%{get(b:list_status, \"args\", \"\")}",
+        "(%L/%{get(b:list_status, \"total\", \"\")})",
+        "%=",
+        "%#CocListPath# %{get(b:list_status, \"cwd\", \"\")} %l/%L%*"
+      ],
+      "items": {
+        "types": "string"
+      },
+      "description": "An array of statusline segments that will be used to draw the status line for list windows."
     },
     "list.signOffset": {
       "type": "number",
