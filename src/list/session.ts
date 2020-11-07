@@ -1,11 +1,12 @@
 import { Buffer, Neovim, Window } from '@chemzqm/neovim'
 import debounce from 'debounce'
-import { Disposable } from 'vscode-languageserver-protocol'
+import { CancellationTokenSource, Disposable } from 'vscode-languageserver-protocol'
 import extensions from '../extensions'
 import Highlighter from '../model/highligher'
 import { IList, ListAction, ListContext, ListItem, ListMode, ListOptions, Matcher } from '../types'
 import { disposeAll, wait } from '../util'
 import workspace from '../workspace'
+import window from '../window'
 import ListConfiguration from './configuration'
 import InputHistory from './history'
 import Prompt from './prompt'
@@ -22,6 +23,7 @@ export default class ListSession {
   public readonly ui: UI
   public readonly worker: Worker
   private cwd: string
+  private uiTokenSource: CancellationTokenSource
   private interval: NodeJS.Timer
   private loadingFrame = ''
   private timer: NodeJS.Timer
@@ -105,7 +107,8 @@ export default class ListSession {
         if (finished && !listOptions.interactive && listOptions.input.length == 0) {
           height = Math.min(items.length, height)
         }
-        await this.ui.drawItems(items, Math.max(1, height), reload)
+        let tokenSource = this.uiTokenSource = new CancellationTokenSource()
+        await this.ui.drawItems(items, Math.max(1, height), reload, tokenSource.token)
       }
     }, null, this.disposables)
     this.worker.onDidChangeLoading(loading => {
@@ -151,7 +154,7 @@ export default class ListSession {
   }
 
   public async call(fname: string): Promise<any> {
-    await this.nvim.call('coc#list#stop_prompt', [])
+    await this.nvim.call('coc#prompt#stop_prompt', ['list'])
     let targets = await this.ui.getItems()
     let context = {
       name: this.name,
@@ -196,7 +199,7 @@ export default class ListSession {
       logger.error(`Can't create shortcut for actions: ${invalids.join(',')} of "${this.name}" list`)
       names = names.filter(s => !invalids.includes(s))
     }
-    await nvim.call('coc#list#stop_prompt')
+    await nvim.call('coc#prompt#stop_prompt', ['list'])
     let n = await nvim.call('confirm', ['Choose action:', choices.join('\n')]) as number
     await wait(10)
     this.prompt.start()
@@ -208,7 +211,7 @@ export default class ListSession {
     name = name || list.defaultAction
     let action = list.actions.find(o => o.name == name)
     if (!action) {
-      workspace.showMessage(`Action ${name} not found`, 'error')
+      window.showMessage(`Action ${name} not found`, 'error')
       return
     }
     let items: ListItem[]
@@ -286,13 +289,18 @@ export default class ListSession {
 
   public async hide(): Promise<void> {
     if (this.hidden) return
+    if (this.uiTokenSource) {
+      this.uiTokenSource.cancel()
+      this.uiTokenSource.dispose()
+      this.uiTokenSource = null
+    }
     let { nvim, interval, listOptions, savedHeight, window } = this
     if (interval) clearInterval(interval)
     this.hidden = true
     this.worker.stop()
     this.history.add()
     nvim.pauseNotification()
-    nvim.call('coc#list#stop_prompt', [], true)
+    nvim.call('coc#prompt#stop_prompt', ['list'], true)
     nvim.command('pclose', true)
     this.ui.close()
     if (window && savedHeight && listOptions.position != 'tab') {
@@ -478,7 +486,7 @@ export default class ListSession {
     let { window, nvim } = this
     if (window) {
       nvim.pauseNotification()
-      nvim.call('coc#list#stop_prompt', [], true)
+      nvim.call('coc#prompt#stop_prompt', ['list'], true)
       this.nvim.call('win_gotoid', [window.id], true)
       nvim.resumeNotification(false, true).logError()
     }
@@ -507,7 +515,7 @@ export default class ListSession {
       if (!persist) {
         if (noQuit) {
           nvim.pauseNotification()
-          nvim.call('coc#list#stop_prompt', [], true)
+          nvim.call('coc#prompt#stop_prompt', ['list'], true)
           nvim.call('win_gotoid', [this.context.window.id], true)
           await nvim.resumeNotification()
         } else {

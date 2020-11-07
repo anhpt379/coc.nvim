@@ -38,23 +38,30 @@ export interface DialogButton {
 export interface DialogPreferences {
   maxWidth?: number
   maxHeight?: number
+  floatHighlight?: string
+  floatBorderHighlight?: string
+  pickerButtons?: boolean
+  pickerButtonShortcut?: boolean
 }
 
 export interface DialogConfig {
   content: string
+  /**
+   * Optional title text.
+   */
   title?: string
   /**
    * show close button, default to true when not specified.
    */
   close?: boolean
   /**
-   * highlight group for dialog window,
+   * highlight group for dialog window, default to `"dialog.floatHighlight"` or 'CocFlating'
    */
   highlight?: string
   /**
-   * highlight groups for border, only first highlight works for now.
+   * highlight groups for border, default to `"dialog.borderhighlight"` or 'CocFlating'
    */
-  borderhighlight?: string[]
+  borderhighlight?: string
   /**
    * Buttons as bottom of dialog.
    */
@@ -63,6 +70,28 @@ export interface DialogConfig {
    * index is -1 for window close without button click
    */
   callback?: (index: number) => void
+}
+
+/**
+ * Represents an item that can be selected from
+ * a list of items.
+ */
+export interface QuickPickItem {
+
+  /**
+   * A human-readable string which is rendered prominent
+   */
+  label: string
+
+  /**
+   * A human-readable string which is rendered less prominent in the same line
+   */
+  description?: string
+
+  /**
+   * Optional flag indicating if this item is picked initially.
+   */
+  picked?: boolean
 }
 
 export type DocumentChange = TextDocumentEdit | CreateFile | RenameFile | DeleteFile
@@ -316,9 +345,9 @@ export interface Env {
   disabledSources: { [filetype: string]: string[] }
   readonly guicursor: string
   readonly mode: string
+  readonly apiversion: number
   readonly floating: boolean
   readonly extensionRoot: string
-  readonly watchExtensions: string[]
   readonly globalExtensions: string[]
   readonly workspaceFolders: string[]
   readonly config: any
@@ -568,6 +597,11 @@ export interface InsertChange {
   changedtick: number
 }
 
+export interface ScreenPosition {
+  row: number
+  col: number
+}
+
 export interface PumBounding {
   readonly height: number
   readonly width: number
@@ -781,10 +815,17 @@ export interface RenameEvent {
 }
 
 export interface OpenTerminalOption {
+  /**
+   * Cwd of terminal, default to result of |getcwd()|
+   */
   cwd?: string
-  // default true
+  /**
+   * Close terminal on job finish, default to true.
+   */
   autoclose?: boolean
-  // default false
+  /**
+   * Keep foucus current window, default to false,
+   */
   keepfocus?: boolean
 }
 
@@ -1249,7 +1290,7 @@ export interface Thenable<T> {
  * An output channel is a container for readonly textual information.
  *
  * To get an instance of an `OutputChannel` use
- * [createOutputChannel](#workspace.createOutputChannel).
+ * [createOutputChannel](#window.createOutputChannel).
  */
 export interface OutputChannel {
 
@@ -1410,10 +1451,8 @@ export interface IWorkspace {
   onDidChangeConfiguration: Event<ConfigurationChangeEvent>
   onDidWorkspaceInitialized: Event<void>
   onWillSaveUntil(callback: (event: TextDocumentWillSaveEvent) => void, thisArg: any, clientId: string): Disposable
-  showMessage(msg: string, identify?: MsgTypes): void
   findUp(filename: string | string[]): Promise<string | null>
   getDocument(uri: number | string): Document
-  getOffset(): Promise<number>
   getFormatOptions(uri?: string): Promise<FormattingOptions>
   getConfigFile(target: ConfigurationTarget): string
   applyEdit(edit: WorkspaceEdit): Promise<boolean>
@@ -1423,23 +1462,14 @@ export interface IWorkspace {
   getQuickfixItem(loc: Location, text?: string, type?: string): Promise<QuickfixItem>
   getLine(uri: string, line: number): Promise<string>
   readFile(uri: string): Promise<string>
-  echoLines(lines: string[], truncate?: boolean): Promise<void>
   getCurrentState(): Promise<EditerState>
-  getCursorPosition(): Promise<Position>
   jumpTo(uri: string, position: Position): Promise<void>
   createFile(filepath: string, opts?: CreateFileOptions): Promise<void>
   renameFile(oldPath: string, newPath: string, opts?: RenameFileOptions): Promise<void>
   deleteFile(filepath: string, opts?: DeleteFileOptions): Promise<void>
   openResource(uri: string): Promise<void>
-  createOutputChannel(name: string): OutputChannel
-  showOutputChannel(name: string): void
   resolveModule(name: string): Promise<string>
-  showQuickpick(items: string[], placeholder?: string): Promise<number>
-  showPrompt(title: string): Promise<boolean>
-  requestInput(title: string, defaultValue?: string): Promise<string>
   match(selector: DocumentSelector, document: TextDocument): number
   runCommand(cmd: string, cwd?: string, timeout?: number): Promise<string>
-  runTerminalCommand(cmd: string, cwd?: string, keepfocus?: boolean): Promise<TerminalResult>
-  createStatusBarItem(priority?: number): StatusBarItem
   dispose(): void
 }

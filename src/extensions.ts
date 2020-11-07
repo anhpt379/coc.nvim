@@ -16,7 +16,7 @@ import InstallBuffer from './model/installBuffer'
 import { createInstallerFactory } from './model/installer'
 import Memos from './model/memos'
 import { Documentation, Extension, ExtensionContext, ExtensionInfo, ExtensionState, ExtensionType } from './types'
-import { disposeAll, wait, concurrent } from './util'
+import { disposeAll, wait, concurrent, watchFile } from './util'
 import { distinct, splitArray } from './util/array'
 import './util/extensions'
 import { createExtension, ExtensionExport } from './util/factory'
@@ -24,6 +24,7 @@ import { inDirectory, readdirAsync, readFile, realpathAsync } from './util/fs'
 import { objectLiteral } from './util/is'
 import Watchman from './watchman'
 import workspace from './workspace'
+import window from './window'
 import mkdirp from 'mkdirp'
 import { OutputChannel } from './types'
 
@@ -97,7 +98,7 @@ export class Extensions {
   public async init(): Promise<void> {
     let data = loadJson(this.db.filepath) || {}
     let keys = Object.keys(data.extension || {})
-    this.outputChannel = workspace.createOutputChannel('extensions')
+    this.outputChannel = window.createOutputChannel('extensions')
     for (let key of keys) {
       if (data.extension[key].disabled == true) {
         this.disabled.add(key)
@@ -173,7 +174,7 @@ export class Extensions {
     stats = stats.filter(o => ![...lockedList, ...this.disabled].includes(o.id))
     this.db.push('lastUpdate', Date.now())
     if (silent) {
-      workspace.showMessage('Updating extensions, checkout output:///extensions for details.', 'more')
+      window.showMessage('Updating extensions, checkout output:///extensions for details.', 'more')
     }
     let installBuffer = this.installBuffer = new InstallBuffer(true, sync, silent ? this.outputChannel : undefined)
     installBuffer.setExtensions(stats.map(o => o.id))
@@ -202,33 +203,10 @@ export class Extensions {
   }
 
   private async checkExtensions(): Promise<void> {
-    let { globalExtensions, watchExtensions } = workspace.env
+    let { globalExtensions } = workspace.env
     if (globalExtensions && globalExtensions.length) {
       let names = this.filterGlobalExtensions(globalExtensions)
       this.installExtensions(names).logError()
-    }
-    // watch for changes
-    if (watchExtensions && watchExtensions.length) {
-      let watchmanPath = workspace.getWatchmanPath()
-      if (!watchmanPath) return
-      for (let name of watchExtensions) {
-        let item = this.extensions.get(name)
-        if (item && item.directory) {
-          let directory = await promisify(fs.realpath)(item.directory)
-          let client = await Watchman.createClient(watchmanPath, directory)
-          if (client) {
-            this.disposables.push(client)
-            client.subscribe('**/*.js', async () => {
-              await this.reloadExtension(name)
-              workspace.showMessage(`reloaded ${name}`)
-            }).then(disposable => {
-              this.disposables.push(disposable)
-            }, e => {
-              logger.error(e)
-            })
-          }
-        }
-      }
     }
   }
 
@@ -293,7 +271,7 @@ export class Extensions {
         continue
       }
     }
-    workspace.showMessage(`Can't find npm or yarn in your $PATH`, 'error')
+    window.showMessage(`Can't find npm or yarn in your $PATH`, 'error')
     return null
   }
 
@@ -363,11 +341,11 @@ export class Extensions {
   public async reloadExtension(id: string): Promise<void> {
     let item = this.extensions.get(id)
     if (!item) {
-      workspace.showMessage(`Extension ${id} not registered`, 'error')
+      window.showMessage(`Extension ${id} not registered`, 'error')
       return
     }
     if (item.type == ExtensionType.Internal) {
-      workspace.showMessage(`Can't reload internal extension "${item.id}"`, 'warning')
+      window.showMessage(`Can't reload internal extension "${item.id}"`, 'warning')
       return
     }
     if (item.type == ExtensionType.SingleFile) {
@@ -375,7 +353,7 @@ export class Extensions {
     } else if (item.directory) {
       await this.loadExtension(item.directory)
     } else {
-      workspace.showMessage(`Can't reload extension ${item.id}`, 'warning')
+      window.showMessage(`Can't reload extension ${item.id}`, 'warning')
     }
   }
 
@@ -403,7 +381,7 @@ export class Extensions {
       if (!ids.length) return
       let [globals, filtered] = splitArray(ids, id => this.globalExtensions.includes(id))
       if (filtered.length) {
-        workspace.showMessage(`Extensions ${filtered} not global extensions, can't uninstall!`, 'warning')
+        window.showMessage(`Extensions ${filtered} not global extensions, can't uninstall!`, 'warning')
       }
       let json = this.loadJson() || { dependencies: {} }
       for (let id of globals) {
@@ -422,9 +400,9 @@ export class Extensions {
       })
       let jsonFile = path.join(this.root, 'package.json')
       fs.writeFileSync(jsonFile, JSON.stringify(sortedObj, null, 2), { encoding: 'utf8' })
-      workspace.showMessage(`Removed: ${globals.join(' ')}`)
+      window.showMessage(`Removed: ${globals.join(' ')}`)
     } catch (e) {
-      workspace.showMessage(`Uninstall failed: ${e.message}`, 'error')
+      window.showMessage(`Uninstall failed: ${e.message}`, 'error')
     }
   }
 
@@ -460,7 +438,7 @@ export class Extensions {
       this.createExtension(folder, Object.freeze(packageJSON), isLocal ? ExtensionType.Local : ExtensionType.Global)
       return true
     } catch (e) {
-      workspace.showMessage(`Error on load extension from "${folder}": ${e.message}`, 'error')
+      window.showMessage(`Error on load extension from "${folder}": ${e.message}`, 'error')
       logger.error(`Error on load extension from ${folder}`, e)
       return false
     }
@@ -475,27 +453,46 @@ export class Extensions {
     for (let file of files) {
       await this.loadExtensionFile(path.join(folder, file))
     }
-    let watchmanPath = workspace.getWatchmanPath()
-    if (!watchmanPath) return
-    let client = await Watchman.createClient(watchmanPath, folder)
-    if (!client) return
-    this.disposables.push(client)
-    client.subscribe('*.js', async ({ root, files }) => {
-      files = files.filter(f => f.type == 'f')
-      for (let file of files) {
-        let id = `single-` + path.basename(file.name, 'js')
-        if (file.exists) {
-          let filepath = path.join(root, file.name)
-          await this.loadExtensionFile(filepath)
-        } else {
-          await this.unloadExtension(id)
-        }
+  }
+
+  public loadedExtensions(): string[] {
+    return Array.from(this.extensions.keys())
+  }
+
+  public async watchExtension(id: string): Promise<void> {
+    let item = this.extensions.get(id)
+    if (!item) {
+      window.showMessage(`extension ${id} not found`, 'error')
+      return
+    }
+    if (id.startsWith('single-')) {
+      window.showMessage(`watching ${item.filepath}`)
+      this.disposables.push(watchFile(item.filepath, async () => {
+        await this.loadExtensionFile(item.filepath)
+        window.showMessage(`reloaded ${id}`)
+      }))
+    } else {
+      let watchmanPath = workspace.getWatchmanPath()
+      if (!watchmanPath) {
+        window.showMessage('watchman not found', 'error')
+        return
       }
-    }).then(disposable => {
-      this.disposables.push(disposable)
-    }, e => {
-      logger.error(e)
-    })
+      let client = await Watchman.createClient(watchmanPath, item.directory)
+      if (!client) {
+        window.showMessage(`Can't create watchman client, check output:///watchman`)
+        return
+      }
+      window.showMessage(`watching ${item.directory}`)
+      this.disposables.push(client)
+      client.subscribe('**/*.js', async () => {
+        await this.reloadExtension(id)
+        window.showMessage(`reloaded ${id}`)
+      }).then(disposable => {
+        this.disposables.push(disposable)
+      }, e => {
+        logger.error(e)
+      })
+    }
   }
 
   /**
@@ -599,7 +596,7 @@ export class Extensions {
         let root = path.join(modulesFolder, key)
         let res = this.checkDirectory(root)
         if (res instanceof Error) {
-          workspace.showMessage(`Unable to load global extension at ${root}: ${res.message}`, 'error')
+          window.showMessage(`Unable to load global extension at ${root}: ${res.message}`, 'error')
           logger.error(`Error on load ${root}`, res)
           return resolve(null)
         }
@@ -688,7 +685,7 @@ export class Extensions {
     if (!this.canActivate(id)) return
     if (!activationEvents || Array.isArray(activationEvents) && activationEvents.includes('*')) {
       await this.activate(id).catch(e => {
-        workspace.showMessage(`Error on activate extension ${id}: ${e.message}`)
+        window.showMessage(`Error on activate extension ${id}: ${e.message}`)
         logger.error(`Error on activate extension ${id}`, e)
       })
       return
@@ -707,7 +704,7 @@ export class Extensions {
           resolve()
         }, e => {
           clearTimeout(timer)
-          workspace.showMessage(`Error on activate extension ${id}: ${e.message}`)
+          window.showMessage(`Error on activate extension ${id}: ${e.message}`)
           logger.error(`Error on activate extension ${id}`, e)
           resolve()
         })
@@ -765,7 +762,7 @@ export class Extensions {
           }
         }, null, disposables)
       } else {
-        workspace.showMessage(`Unsupported event ${eventName} of ${id}`, 'error')
+        window.showMessage(`Unsupported event ${eventName} of ${id}`, 'error')
       }
     }
   }
