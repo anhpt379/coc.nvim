@@ -1,12 +1,9 @@
 import { Buffer, NeovimClient as Neovim } from '@chemzqm/neovim'
 import bytes from 'bytes'
 import fastDiff from 'fast-diff'
-import fs from 'fs'
-import mkdirp from 'mkdirp'
+import fs from 'fs-extra'
 import os from 'os'
 import path from 'path'
-import rimraf from 'rimraf'
-import util from 'util'
 import { v1 as uuid } from 'uuid'
 import { CancellationTokenSource, CreateFile, CreateFileOptions, DeleteFile, DeleteFileOptions, Disposable, DocumentSelector, Emitter, Event, FormattingOptions, Location, LocationLink, Position, Range, RenameFile, RenameFileOptions, TextDocumentEdit, TextDocumentSaveReason, TextEdit, WorkspaceEdit, WorkspaceFolder, WorkspaceFoldersChangeEvent } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
@@ -50,6 +47,7 @@ const methods = [
   'createStatusBarItem',
   'createOutputChannel',
   'showOutputChannel',
+  'requestInput',
   'echoLines',
   'getCursorPosition',
   'moveTo',
@@ -888,7 +886,7 @@ export class Workspace implements IWorkspace {
       if (filepath.endsWith('/')) {
         try {
           filepath = this.expand(filepath)
-          await mkdirp(filepath)
+          await fs.mkdirp(filepath)
         } catch (e) {
           window.showMessage(`Can't create ${filepath}: ${e.message}`, 'error')
         }
@@ -897,7 +895,7 @@ export class Workspace implements IWorkspace {
         let doc = this.getDocument(uri)
         if (doc) return
         if (!fs.existsSync(path.dirname(filepath))) {
-          fs.mkdirSync(path.dirname(filepath), { recursive: true })
+          fs.mkdirpSync(path.dirname(filepath))
         }
         fs.writeFileSync(filepath, '', 'utf8')
         await this.loadFile(uri)
@@ -975,7 +973,7 @@ export class Workspace implements IWorkspace {
         if (doc != null) {
           let content = doc.getDocumentContent()
           let encoding = await doc.buffer.getOption('fileencoding') as any
-          await util.promisify(fs.writeFile)(newPath, content, { encoding })
+          await fs.writeFile(newPath, content, { encoding })
           // open renamed file
           if (!isCurrent) {
             await nvim.call('coc#util#open_files', [[newPath]])
@@ -989,7 +987,7 @@ export class Workspace implements IWorkspace {
             await nvim.resumeNotification()
           }
           // avoid vim detect file unlink
-          await util.promisify(fs.unlink)(oldPath)
+          await fs.unlink(oldPath)
         } else {
           await renameAsync(oldPath, newPath)
         }
@@ -1021,11 +1019,11 @@ export class Workspace implements IWorkspace {
     }
     try {
       if (isDir && recursive) {
-        rimraf.sync(filepath)
+        await fs.remove(filepath)
       } else if (isDir) {
-        await util.promisify(fs.rmdir)(filepath)
+        await fs.rmdir(filepath)
       } else {
-        await util.promisify(fs.unlink)(filepath)
+        await fs.unlink(filepath)
       }
       if (!isDir) {
         let uri = URI.file(filepath).toString()
@@ -1235,7 +1233,7 @@ export class Workspace implements IWorkspace {
     let root: string
     if (global.hasOwnProperty('__TEST__')) {
       root = path.join(os.tmpdir(), `coc-${process.pid}`)
-      fs.mkdirSync(root, { recursive: true })
+      fs.mkdirpSync(root)
     } else {
       root = path.dirname(this.env.extensionRoot)
     }
@@ -1277,7 +1275,7 @@ augroup coc_dynamic_autocmd
 augroup end`
     try {
       let dir = path.join(process.env.TMPDIR, `coc.nvim-${process.pid}`)
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      if (!fs.existsSync(dir)) fs.mkdirpSync(dir)
       let filepath = path.join(dir, `coc-${process.pid}.vim`)
       fs.writeFileSync(filepath, content, 'utf8')
       let cmd = `source ${filepath}`
@@ -1312,15 +1310,14 @@ augroup end`
   public async attach(): Promise<void> {
     if (this._attached) return
     this._attached = true
-    let buffers = await this.nvim.buffers
-    let bufnr = this.bufnr = await this.nvim.call('bufnr', '%')
-    await Promise.all(buffers.map(buf => this.onBufCreate(buf)))
+    let [bufs, bufnr, winid] = await this.nvim.eval(`[map(getbufinfo({'bufloaded': 1}), 'v:val["bufnr"]'),bufnr('%'),win_getid()]`) as [number[], number, number]
+    this.bufnr = bufnr
+    await Promise.all(bufs.map(buf => this.onBufCreate(buf)))
     if (!this._initialized) {
       this._onDidWorkspaceInitialized.fire(void 0)
       this._initialized = true
     }
     await events.fire('BufEnter', [bufnr])
-    let winid = await this.nvim.call('win_getid')
     await events.fire('BufWinEnter', [bufnr, winid])
   }
 
