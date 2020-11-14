@@ -24,8 +24,11 @@ function! coc#float#has_float() abort
   return 0
 endfunction
 
-function! coc#float#execute(winid, command)
+function! coc#float#execute(winid, command) abort
   if s:is_vim
+    if !exists('*win_execute')
+      throw 'win_execute function not exists, please upgrade your vim.'
+    endif
     if type(a:command) == v:t_string
       keepalt call win_execute(a:winid, a:command)
     elseif type(a:command) == v:t_list
@@ -476,16 +479,18 @@ function! coc#float#create_cursor_float(winid, bufnr, lines, config) abort
   if !s:float_supported
     return v:null
   endif
-  let allowSelection = get(a:config, 'allowSelection', 0)
+  if s:is_blocking()
+    return v:null
+  endif
   let pumAlignTop = get(a:config, 'pumAlignTop', 0)
+  let modes = get(a:config, 'modes', ['n', 'i', 'ic', 's'])
   let mode = mode()
   let currbuf = bufnr('%')
   let pos = [line('.'), col('.')]
-  let checked = (mode == 's' && allowSelection) || index(['i', 'n', 'ic'], mode) != -1
-  if !checked
+  if index(modes, mode) == -1
     return v:null
   endif
-  if !s:is_vim && mode ==# 'i'
+  if has('nvim') && mode ==# 'i'
     " helps to fix undo issue, don't know why.
     call feedkeys("\<C-g>u", 'n')
   endif
@@ -525,10 +530,11 @@ function! coc#float#create_prompt_win(title, default) abort
   else
     let col = curr + width <= &columns - 2 ? 0 : &columns - s:prompt_win_width
   endif
+  let [lineIdx, colIdx] = coc#float#win_position()
   let res = coc#float#create_float_win(0, s:prompt_win_bufnr, {
         \ 'relative': 'cursor',
-        \ 'row': 0,
-        \ 'col': col - 1,
+        \ 'row': lineIdx == 0 ? 1 : 0,
+        \ 'col': colIdx == 0 ? 0 : col - 1,
         \ 'width': width,
         \ 'height': 1,
         \ 'style': 'minimal',
@@ -548,7 +554,7 @@ function! coc#float#create_prompt_win(title, default) abort
   inoremap <buffer><expr><C-e> pumvisible() ? "\<C-e>" : "\<End>"
   exe 'inoremap <silent><buffer> <esc> <C-r>=coc#float#close_i('.winid.')<CR><esc>'
   exe 'nnoremap <silent><buffer> <esc> :call coc#float#close('.winid.')<CR>'
-  exe 'inoremap <expr><nowait><buffer> <cr> "\<c-r>=coc#float#prompt_insert('.winid.')\<cr>\<esc>"'
+  exe 'inoremap <expr><nowait><buffer> <cr> "\<C-r>=coc#float#prompt_insert('.winid.')\<cr>\<esc>"'
   call feedkeys('A', 'in')
   return [s:prompt_win_bufnr, winid]
 endfunction
@@ -559,10 +565,9 @@ function! coc#float#close_i(winid) abort
 endfunction
 
 function! coc#float#prompt_insert(winid) abort
-  let text = getline('.')
+  let text = getline(1)
   let bufnr = winbufnr(a:winid)
-  call coc#rpc#notify('PromptInsert',[text, bufnr])
-  call timer_start(50, { -> coc#float#close(a:winid)})
+  call coc#rpc#notify('PromptInsert',[text])
   return ''
 endfunction
 
@@ -724,7 +729,7 @@ function! s:scroll_vim(win_ids, forward, amount) abort
     if s:popup_visible(id)
       let pos = popup_getpos(id)
       let bufnr = winbufnr(id)
-      let linecount = get(getbufinfo(bufnr)[0], 'linecount', 0)
+      let linecount = len(getbufline(bufnr, 1, '$'))
       " for forward use last line (or last line + 1) as first line
       if a:forward
         if pos['firstline'] == pos['lastline']
@@ -976,7 +981,7 @@ function! coc#float#get_config_cursor(lines, config) abort
     return v:null
   endif
   let col = - max([offsetX, colIdx - (&columns - 1 - width)])
-  let row = showTop ? - height : 1
+  let row = showTop ? - height + bh : 1
   return {
         \ 'row': row,
         \ 'col': col,
@@ -1005,8 +1010,8 @@ function! coc#float#create_pum_float(winid, bufnr, lines, config) abort
     let width = max([width, dw + 2])
     let ch += float2nr(ceil(str2float(string(dw))/(maxWidth - 2)))
   endfor
-  let width = coc#helper#min(maxWidth, width)
-  let height = coc#helper#min(maxHeight, ch)
+  let width = float2nr(coc#helper#min(maxWidth, width))
+  let height = float2nr(coc#helper#min(maxHeight, ch))
   let lines = map(a:lines, {_, s -> s =~# '^—' ? repeat('—', width - 2 + (s:is_vim && ch > height ? -1 : 0)) : s})
   let opts = {
         \ 'lines': lines,
@@ -1520,4 +1525,11 @@ function! s:popup_cursor(n) abort
     return 'cursor'.a:n
   endif
   return 'cursor+'.a:n
+endfunction
+
+function! s:is_blocking() abort
+  if coc#prompt#activated()
+    return 1
+  endif
+  return 0
 endfunction

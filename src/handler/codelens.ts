@@ -180,7 +180,7 @@ export default class CodeLensManager {
     nvim.pauseNotification()
     let doc = workspace.getDocument(bufnr)
     if (doc && clear) {
-      doc.clearMatchIds([this.srcId])
+      this.clear(doc.bufnr)
     }
     if (codeLenses && codeLenses.length) await this.setVirtualText(doc.buffer, codeLenses)
     await nvim.resumeNotification(false, true)
@@ -224,7 +224,7 @@ export default class CodeLensManager {
     } else if (commands.length == 1) {
       commandManager.execute(commands[0])
     } else {
-      let res = await window.showQuickpick(commands.map(c => c.title))
+      let res = await window.showMenuPicker(commands.map(c => c.title))
       if (res == -1) return
       commandManager.execute(commands[res])
     }

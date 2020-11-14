@@ -85,10 +85,7 @@ export class ListManager implements Disposable {
     if (!res) return
     let { name } = res.list
     let curr = this.sessionsMap.get(name)
-    if (curr) {
-      this.nvim.command('pclose', true)
-      curr.dispose()
-    }
+    if (curr) curr.dispose()
     this.prompt.start(res.options)
     let session = new ListSession(this.nvim, this.prompt, res.list, res.options, res.listArgs, this.config)
     this.sessionsMap.set(name, session)
@@ -193,9 +190,10 @@ export class ListManager implements Disposable {
 
   public async togglePreview(): Promise<void> {
     let { nvim } = this
-    let has = await nvim.call('coc#list#has_preview')
-    if (has) {
-      await nvim.command('pclose')
+    let winid = await nvim.call('coc#list#get_preview', [0])
+    if (winid != -1) {
+      let win = nvim.createWindow(winid)
+      await win.close(true)
       await nvim.command('redraw')
     } else {
       await this.doAction('preview')
@@ -329,6 +327,7 @@ export class ListManager implements Disposable {
     if (n) return
     let done = await this.mappings.doInsertKeymap(ch)
     if (done || charmod) return
+    if (ch.startsWith('<') && ch.endsWith('>')) return
     for (let s of ch) {
       let code = s.codePointAt(0)
       if (code == 65533) return

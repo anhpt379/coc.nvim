@@ -53,9 +53,10 @@ export default class ListSession {
     })
     this.interactiveDebounceTime = config.get<number>('interactiveDebounceTime', 100)
     let debouncedChangeLine = debounce(async () => {
-      let [previewing, mode] = await nvim.eval('[coc#util#has_preview(),mode()]') as [number, string]
-      if (!previewing || mode != 'n') return
-      if (previewing) await this.doAction('preview')
+      let [previewing, currwin, lnum] = await nvim.eval('[coc#list#has_preview(),win_getid(),line(".")]') as [number, number, number]
+      if (previewing && currwin == this.winid) {
+        await this.doPreview(lnum - 1)
+      }
     }, 50)
     this.disposables.push({
       dispose: () => {
@@ -68,7 +69,7 @@ export default class ListSession {
     let debounced = debounce(async () => {
       let { autoPreview } = this.listOptions
       if (!autoPreview) {
-        let [previewing, mode] = await nvim.eval('[coc#util#has_preview(),mode()]') as [number, string]
+        let [previewing, mode] = await nvim.eval('[coc#list#has_preview(),mode()]') as [number, string]
         if (!previewing || mode != 'n') return
       }
       await this.doAction('preview')
@@ -224,38 +225,34 @@ export default class ListSession {
     if (items.length) await this.doItemAction(items, action)
   }
 
+  private async doPreview(index: number): Promise<void> {
+    let item = this.ui.getItem(index)
+    let action = this.list.actions.find(o => o.name == 'preview')
+    if (!item || !action) return
+    await this.doItemAction([item], action)
+  }
+
   public async first(): Promise<void> {
-    let { ui } = this
-    let item = this.ui.firstItem
-    if (!item) return
-    ui.index = 0
-    await this.doItemAction([item], this.defaultAction)
-    await ui.echoMessage(item)
+    await this.doDefaultAction(0)
   }
 
   public async last(): Promise<void> {
-    let { ui } = this
-    let item = this.ui.lastItem
-    if (!item) return
-    ui.index = this.ui.length - 1
-    await this.doItemAction([item], this.defaultAction)
-    await ui.echoMessage(item)
+    await this.doDefaultAction(this.ui.length - 1)
   }
 
   public async previous(): Promise<void> {
-    let { ui } = this
-    let item = ui.getItem(-1)
-    if (!item) return
-    ui.index = ui.index - 1
-    await this.doItemAction([item], this.defaultAction)
-    await ui.echoMessage(item)
+    await this.doDefaultAction(this.ui.index - 1)
   }
 
   public async next(): Promise<void> {
+    await this.doDefaultAction(this.ui.index + 1)
+  }
+
+  private async doDefaultAction(index: number): Promise<void> {
     let { ui } = this
-    let item = ui.getItem(1)
+    let item = ui.getItem(index)
     if (!item) return
-    ui.index = ui.index + 1
+    ui.index = index
     await this.doItemAction([item], this.defaultAction)
     await ui.echoMessage(item)
   }
@@ -301,7 +298,13 @@ export default class ListSession {
     this.history.add()
     let { winid } = this.ui
     this.ui.reset()
-    await nvim.call('coc#list#hide', [winid])
+    await nvim.call('coc#list#hide', [this.window.id, this.savedHeight, winid])
+    if (workspace.isVim) {
+      nvim.command('redraw', true)
+      // Needed for tabe action, don't know why.
+      await wait(10)
+    }
+    nvim.call('coc#prompt#stop_prompt', ['list'], true)
   }
 
   public toggleMode(): void {
@@ -317,7 +320,7 @@ export default class ListSession {
 
   private async resolveItem(): Promise<void> {
     let index = this.ui.index
-    let item = this.ui.getItem(0)
+    let item = this.ui.getItem(index)
     if (!item || item.resolved) return
     let { list } = this
     if (typeof list.resolveItem == 'function') {
@@ -503,18 +506,17 @@ export default class ListSession {
   private async doItemAction(items: ListItem[], action: ListAction): Promise<void> {
     let { noQuit } = this.listOptions
     let { nvim } = this
-    let persist = this.winid && (action.persist === true || action.name == 'preview')
-    noQuit = noQuit && this.winid != null
+    let persist = this.winid && (action.persist === true || action.name == 'preview' || noQuit)
     try {
-      if (!persist) {
-        if (noQuit) {
+      if (persist) {
+        if (action.name != 'preview' && !action.persist) {
           nvim.pauseNotification()
           nvim.call('coc#prompt#stop_prompt', ['list'], true)
           nvim.call('win_gotoid', [this.context.window.id], true)
           await nvim.resumeNotification()
-        } else {
-          await this.hide()
         }
+      } else {
+        await this.hide()
       }
       if (action.multiple) {
         await Promise.resolve(action.execute(items, this.context))
@@ -527,10 +529,8 @@ export default class ListSession {
       }
       if (persist) {
         this.ui.restoreWindow()
-        if (action.reload) await this.worker.loadItems(this.context, true)
-      } else if (noQuit) {
-        if (action.reload) await this.worker.loadItems(this.context, true)
       }
+      if (action.reload && persist) await this.worker.loadItems(this.context, true)
     } catch (e) {
       console.error(e)
     }

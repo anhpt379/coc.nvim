@@ -424,9 +424,9 @@ Built-in configurations:~
 
 	Offset number of buffer.addHighlight, Neovim only, default: `1000`
 
-"diagnostic.signOffset":~
+"diagnostic.signPriority":~
 
-	Offset number of sign, default: `1000`
+	Priority of diagnostic sign, default to `10`, check |sign-priority|.
 
 "diagnostic.errorSign":~
 
@@ -500,6 +500,11 @@ Built-in configurations:~
 	Maximum height of floating window with the signature help, default: `8`
 
 							*coc-config-refactor*
+"refactor.saveToFile":~
+
+	Save to file when write refactor buffer with ':noa wa' command, set to
+	false if you want save buffer by yourself.
+
 "refactor.openCommand":~
 
 	Open command for refactor window, default: `vsplit`
@@ -2623,6 +2628,10 @@ LIST COMMAND						*coc-list-command*
 :CocListResume [{name}]					*:CocListResume*
 
 	Reopen last opened list, input and cursor position will be preserved.
+
+:CocListCancel						*:CocListCancel*
+
+	Close list, useful when the list is not the current window.
 
 :CocPrev [{name}]					*:CocPrev*
 

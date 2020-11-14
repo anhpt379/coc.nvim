@@ -24,8 +24,7 @@ export interface DiagnosticConfig {
   checkCurrentLine: boolean
   enableMessage: string
   displayByAle: boolean
-  srcId: number
-  signOffset: number
+  signPriority: number
   errorSign: string
   warningSign: string
   infoSign: string
@@ -113,7 +112,6 @@ export class DiagnosticManager implements Disposable {
     events.on('BufWritePost', async bufnr => {
       let buf = this.buffers.get(bufnr)
       if (!buf) return
-      await buf.checkSigns()
       if (!this.config.refreshAfterSave) return
       this.refreshBuffer(buf.uri)
     }, null, this.disposables)
@@ -160,9 +158,16 @@ export class DiagnosticManager implements Disposable {
     if (!this.shouldValidate(doc)) return
     let { bufnr } = doc
     let buf = this.buffers.get(bufnr)
-    if (buf) return
+    if (buf) {
+      buf.clear()
+      buf.dispose()
+    }
     buf = new DiagnosticBuffer(bufnr, doc.uri, this.config)
     this.buffers.set(bufnr, buf)
+    if (this.enabled) {
+      let diagnostics = this.getDiagnostics(buf.uri)
+      if (diagnostics.length) buf.forceRefresh(diagnostics)
+    }
     buf.onDidRefresh(() => {
       if (['never', 'jump'].includes(this.config.enableMessage)) {
         return
@@ -519,7 +524,7 @@ export class DiagnosticManager implements Disposable {
     })
     if (useFloat) {
       let { maxWindowHeight, maxWindowWidth } = this.config
-      await this.floatFactory.show(docs, { maxWidth: maxWindowWidth, maxHeight: maxWindowHeight })
+      await this.floatFactory.show(docs, { maxWidth: maxWindowWidth, maxHeight: maxWindowHeight, modes: ['n'] })
     } else {
       let lines = docs.map(d => d.content).join('\n').split(/\r?\n/)
       if (lines.length) {
@@ -546,7 +551,7 @@ export class DiagnosticManager implements Disposable {
   private disposeBuffer(bufnr: number): void {
     let buf = this.buffers.get(bufnr)
     if (!buf) return
-    buf.clear().logError()
+    buf.clear()
     buf.dispose()
     this.buffers.delete(bufnr)
     for (let collection of this.collections) {
@@ -562,7 +567,7 @@ export class DiagnosticManager implements Disposable {
 
   public dispose(): void {
     for (let buf of this.buffers.values()) {
-      buf.clear().logError()
+      buf.clear()
       buf.dispose()
     }
     for (let collection of this.collections) {
@@ -587,10 +592,9 @@ export class DiagnosticManager implements Disposable {
     }
     this.config = {
       messageTarget,
-      srcId: workspace.createNameSpace('coc-diagnostic') || 1000,
       virtualTextSrcId: workspace.createNameSpace('diagnostic-virtualText'),
       checkCurrentLine: config.get<boolean>('checkCurrentLine', false),
-      enableSign: config.get<boolean>('enableSign', true),
+      enableSign: workspace.env.sign && config.get<boolean>('enableSign', true),
       locationlistUpdate: config.get<boolean>('locationlistUpdate', true),
       enableHighlightLineNumber: config.get<boolean>('enableHighlightLineNumber', true),
       maxWindowHeight: config.get<number>('maxWindowHeight', 10),
@@ -604,7 +608,7 @@ export class DiagnosticManager implements Disposable {
       virtualTextLines: config.get<number>('virtualTextLines', 3),
       displayByAle: config.get<boolean>('displayByAle', false),
       level: severityLevel(config.get<string>('level', 'hint')),
-      signOffset: config.get<number>('signOffset', 1000),
+      signPriority: config.get<number>('signPriority', 10),
       errorSign: config.get<string>('errorSign', '>>'),
       warningSign: config.get<string>('warningSign', '>>'),
       infoSign: config.get<string>('infoSign', '>>'),
@@ -620,16 +624,10 @@ export class DiagnosticManager implements Disposable {
     if (this.config.displayByAle) {
       this.enabled = false
     }
-    if (event) {
-      for (let severity of ['error', 'info', 'warning', 'hint']) {
-        let key = `diagnostic.${severity}Sign`
-        if (event.affectsConfiguration(key)) {
-          let text = config.get<string>(`${severity}Sign`, '>>')
-          let name = severity[0].toUpperCase() + severity.slice(1)
-          this.nvim.command(`sign define Coc${name}   text=${text}   linehl=Coc${name}Line texthl=Coc${name}Sign`, true)
-        }
-      }
-    }
+  }
+
+  public getCollectionByName(name: string): DiagnosticCollection {
+    return this.collections.find(o => o.name == name)
   }
 
   private getCollections(uri: string): DiagnosticCollection[] {
@@ -646,7 +644,7 @@ export class DiagnosticManager implements Disposable {
     for (let collection of this.collections) {
       collection.delete(buf.uri)
     }
-    buf.clear().logError()
+    buf.clear()
   }
 
   public toggleDiagnostic(): void {
@@ -657,7 +655,7 @@ export class DiagnosticManager implements Disposable {
         let diagnostics = this.getDiagnostics(buf.uri)
         buf.forceRefresh(diagnostics)
       } else {
-        buf.clear().logError()
+        buf.clear()
       }
     }
   }

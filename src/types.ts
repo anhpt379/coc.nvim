@@ -347,6 +347,7 @@ export interface Env {
   readonly mode: string
   readonly apiversion: number
   readonly floating: boolean
+  readonly sign: boolean
   readonly extensionRoot: string
   readonly globalExtensions: string[]
   readonly workspaceFolders: string[]
@@ -712,6 +713,7 @@ export interface CompleteConfig {
   enablePreview: boolean
   enablePreselect: boolean
   labelMaxLength: number
+  floatEnable: boolean
   maxPreviewWidth: number
   autoTrigger: string
   previewIsKeyword: string
@@ -1011,10 +1013,14 @@ export interface IList {
 
 export interface PreiewOptions {
   bufname?: string
-  sketch: boolean
   filetype: string
-  lines?: string[]
+  lines: string[]
   lnum?: number
+  range?: Range
+  /**
+   * @deprecated not used
+   */
+  sketch?: boolean
 }
 
 export interface FetchOptions {

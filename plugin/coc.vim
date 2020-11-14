@@ -22,18 +22,9 @@ function! s:checkVersion() abort
       echohl None
       sleep 2
     else
-      if has('nvim') && !has('nvim-0.4.0')
+      if !has('nvim-0.4.0') && !has('patch-8.1.1719')
         echohl WarningMsg
-        echom "coc.nvim works best on neovim >= 0.4.0, consider upgrade your neovim."
-        echom "You can add this to your vimrc to avoid this message:"
-        echom "    let g:coc_disable_startup_warning = 1"
-        echom "Note that some features may behave incorrectly."
-        echohl None
-        sleep 2
-      elseif !has('nvim') && !has('patch-8.1.1719')
-        echohl WarningMsg
-        echom "coc.nvim need vim >= 8.1.1719 to support features like popup and text property."
-        echom "Consider upgrade your vim for better experience."
+        echom "coc.nvim works best on vim >= 8.1.1719 and neovim >= 0.4.0, consider upgrade your vim."
         echom "You can add this to your vimrc to avoid this message:"
         echom "    let g:coc_disable_startup_warning = 1"
         echom "Note that some features may behave incorrectly."
@@ -273,7 +264,7 @@ function! s:Enable(initialize)
     if has('nvim-0.4.0') || has('patch-8.1.1719')
       autocmd CursorHold        * call coc#float#check_related()
     endif
-    autocmd WinLeave            * call coc#highlight#clear_highlights()
+    autocmd WinLeave            * call coc#highlight#clear_match_group(0, '^CocHighlight')
     autocmd WinLeave            * call s:Autocmd('WinLeave', win_getid())
     autocmd WinEnter            * call s:Autocmd('WinEnter', win_getid())
     autocmd BufWinLeave         * call s:Autocmd('BufWinLeave', +expand('<abuf>'), bufwinid(+expand('<abuf>')))
@@ -347,7 +338,7 @@ function! s:Hi() abort
   else
     hi default link CocFloating Pmenu
   endif
-  if has('nvim') && (!exists('*sign_getdefined') || empty(sign_getdefined('CocCurrentLine')))
+  if !exists('*sign_getdefined') || empty(sign_getdefined('CocCurrentLine'))
     sign define CocCurrentLine linehl=CocMenuSel
   endif
   if has('nvim-0.5.0')
@@ -432,6 +423,7 @@ command! -nargs=+ -complete=custom,s:ExtensionList  CocUninstall :call CocAction
 command! -nargs=* -complete=custom,s:CommandList -range CocCommand :call coc#rpc#notify('runCommand', [<f-args>])
 command! -nargs=* -complete=custom,coc#list#options CocList      :call coc#rpc#notify('openList',  [<f-args>])
 command! -nargs=? -complete=custom,coc#list#names CocListResume   :call coc#rpc#notify('listResume', [<f-args>])
+command! -nargs=0 -complete=custom,coc#list#names CocListCancel   :call coc#rpc#notify('listCancel', [])
 command! -nargs=? -complete=custom,coc#list#names CocPrev         :call coc#rpc#notify('listPrev', [<f-args>])
 command! -nargs=? -complete=custom,coc#list#names CocNext         :call coc#rpc#notify('listNext', [<f-args>])
 command! -nargs=? -complete=custom,coc#list#names CocFirst        :call coc#rpc#notify('listFirst', [<f-args>])

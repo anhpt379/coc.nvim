@@ -19,9 +19,11 @@ const locations: any[] = [{
   text: 'multiple'
 }]
 
+let ns: number
 beforeAll(async () => {
   await helper.setup()
   nvim = helper.nvim
+  ns = await nvim.createNamespace('coc-list') as number
   await nvim.setVar('coc_jump_locations', locations)
 })
 
@@ -44,9 +46,9 @@ describe('list commands', () => {
     await nvim.command('wincmd k')
     let name = await nvim.eval('bufname("%")')
     expect(name).toMatch('location.test.ts')
-    let matches = await nvim.call('getmatches')
-    let find = matches.find(o => o.group == 'Search')
-    expect(find).toBeDefined()
+    let buf = await nvim.buffer
+    let res = await nvim.call('getmatches')
+    expect(res.length).toBe(1)
   })
 
   it('should change highlight on cursor move', async () => {
@@ -58,9 +60,10 @@ describe('list commands', () => {
     await events.fire('CursorMoved', [bufnr, [2, 1]])
     await helper.wait(300)
     await nvim.command('wincmd k')
-    let matches = await nvim.call('getmatches')
-    let find = matches.find(o => o.group == 'Search')
-    expect(find.pos1).toEqual([3, 1, 6])
+    let buf = await nvim.buffer
+    let res = await nvim.call('getmatches')
+    expect(res.length).toBe(1)
+    expect(res[0]['pos1']).toEqual([3, 1, 6])
   })
 
   it('should highlight multiple line range', async () => {
@@ -72,7 +75,10 @@ describe('list commands', () => {
     await events.fire('CursorMoved', [bufnr, [2, 1]])
     await helper.wait(300)
     await nvim.command('wincmd k')
-    let matches = await nvim.call('getmatches')
-    expect(matches.filter(o => o.group == 'Search').length).toBe(2)
+    let buf = await nvim.buffer
+    let res = await nvim.call('getmatches')
+    expect(res.length).toBe(1)
+    expect(res[0]['pos1']).toBeDefined()
+    expect(res[0]['pos2']).toBeDefined()
   })
 })

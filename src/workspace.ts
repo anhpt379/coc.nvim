@@ -24,7 +24,7 @@ import WillSaveUntilHandler from './model/willSaveHandler'
 import { TextDocumentContentProvider } from './provider'
 import { Autocmd, ConfigurationChangeEvent, ConfigurationTarget, DidChangeTextDocumentParams, DocumentChange, EditerState, Env, IWorkspace, KeymapOption, LanguageServerConfig, MapMode, OutputChannel, PatternType, QuickfixItem, Terminal, TerminalOptions, TextDocumentWillSaveEvent, WorkspaceConfiguration } from './types'
 import { distinct } from './util/array'
-import { findUp, fixDriver, inDirectory, isFile, isParentFolder, renameAsync, resolveRoot, statAsync } from './util/fs'
+import { findUp, fixDriver, inDirectory, isFile, isParentFolder, readFileLine, renameAsync, resolveRoot, statAsync } from './util/fs'
 import { CONFIG_FILE_NAME, disposeAll, getKeymapModifier, platform, runCommand, wait } from './util/index'
 import { score } from './util/match'
 import { equals } from './util/object'
@@ -33,7 +33,7 @@ import { byteIndex, byteLength } from './util/string'
 import Watchman from './watchman'
 import window from './window'
 
-const APIVERSION = 7
+const APIVERSION = 8
 const logger = require('./util/logger')('workspace')
 let NAME_SPACE = 1080
 const methods = [
@@ -148,14 +148,14 @@ export class Workspace implements IWorkspace {
       }))
     }
     this.configurations.updateUserConfig(this._env.config)
-    events.on('InsertEnter', () => {
+    events.on(['InsertEnter', 'CursorMovedI'], () => {
       this._insertMode = true
     }, null, this.disposables)
-    events.on('InsertLeave', () => {
+    events.on(['InsertLeave', 'CursorMoved'], () => {
       this._insertMode = false
     }, null, this.disposables)
     events.on('BufWinLeave', (_, winid) => {
-      this.nvim.call('coc#util#clear_pos_matches', ['^Coc', winid], true)
+      this.nvim.call('coc#highlight#clear_match_group', [winid, '^Coc'], true)
     }, null, this.disposables)
     events.on('BufEnter', this.onBufEnter, this, this.disposables)
     events.on('CursorMoved', this.checkCurrentBuffer, this, this.disposables)
@@ -189,10 +189,6 @@ export class Workspace implements IWorkspace {
       }
       this._env.runtimepath = newValue
     }, this.disposables)
-    this.watchOption('iskeyword', (_, newValue: string) => {
-      let doc = this.getDocument(this.bufnr)
-      if (doc) doc.setIskeyword(newValue)
-    }, this.disposables)
     this.watchOption('completeopt', async (_, newValue) => {
       this.env.completeOpt = newValue
       if (!this._attached) return
@@ -208,20 +204,7 @@ export class Workspace implements IWorkspace {
     this.watchGlobal('coc_sources_disable_map', async (_, newValue) => {
       this.env.disabledSources = newValue
     })
-    let provider: TextDocumentContentProvider = {
-      onDidChange: null,
-      provideTextDocumentContent: async (uri: URI) => {
-        let channel = channels.get(uri.path.slice(1))
-        if (!channel) return ''
-        nvim.pauseNotification()
-        nvim.command('setlocal nospell nofoldenable nowrap noswapfile', true)
-        nvim.command('setlocal buftype=nofile bufhidden=hide', true)
-        nvim.command('setfiletype log', true)
-        await nvim.resumeNotification()
-        return channel.content
-      }
-    }
-    this.disposables.push(this.registerTextDocumentContentProvider('output', provider))
+    this.disposables.push(this.registerTextDocumentContentProvider('output', channels.getProvider(nvim)))
   }
 
   public getConfigFile(target: ConfigurationTarget): string {
@@ -311,6 +294,8 @@ export class Workspace implements IWorkspace {
 
   /**
    * uri of current file, could be null
+   *
+   * @deprecated this method is reliable, will be removed in the feature.
    */
   public get uri(): string {
     let { bufnr } = this
@@ -737,8 +722,7 @@ export class Workspace implements IWorkspace {
     if (!uri.startsWith('file:')) return ''
     let fsPath = URI.parse(uri).fsPath
     if (!fs.existsSync(fsPath)) return ''
-    let lines = await this.nvim.call('readfile', [fsPath, '', line + 1]) as string[]
-    return lines[lines.length - 1]
+    return await readFileLine(fsPath, line)
   }
 
   /**
@@ -797,19 +781,20 @@ export class Workspace implements IWorkspace {
    * Current document.
    */
   public get document(): Promise<Document> {
-    let { bufnr } = this
-    if (bufnr == null) return null
-    if (this.buffers.has(bufnr)) {
-      return Promise.resolve(this.buffers.get(bufnr))
-    }
-    if (!this.creatingSources.has(bufnr)) {
-      this.onBufCreate(bufnr).logError()
-    }
-    return new Promise<Document>(resolve => {
-      let disposable = this.onDidOpenTextDocument(doc => {
-        disposable.dispose()
-        resolve(this.getDocument(doc.uri))
-      })
+    return new Promise<Document>((resolve, reject) => {
+      this.nvim.buffer.then(buf => {
+        let bufnr = buf.id
+        this.bufnr = bufnr
+        if (this.buffers.has(bufnr)) {
+          resolve(this.buffers.get(bufnr))
+          return
+        }
+        this.onBufCreate(bufnr).catch(reject)
+        let disposable = this.onDidOpenTextDocument(doc => {
+          disposable.dispose()
+          resolve(this.getDocument(doc.uri))
+        })
+      }, reject)
     })
   }
 
@@ -1310,7 +1295,7 @@ augroup end`
   public async attach(): Promise<void> {
     if (this._attached) return
     this._attached = true
-    let [bufs, bufnr, winid] = await this.nvim.eval(`[map(getbufinfo({'bufloaded': 1}), 'v:val["bufnr"]'),bufnr('%'),win_getid()]`) as [number[], number, number]
+    let [bufs, bufnr, winid] = await this.nvim.eval(`[map(getbufinfo({'bufloaded': 1}),'v:val["bufnr"]'),bufnr('%'),win_getid()]`) as [number[], number, number]
     this.bufnr = bufnr
     await Promise.all(bufs.map(buf => this.onBufCreate(buf)))
     if (!this._initialized) {

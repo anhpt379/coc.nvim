@@ -36,6 +36,7 @@ export interface FloatWinConfig {
   close?: boolean
   highlight?: string
   borderhighlight?: string
+  modes?: string[]
 }
 
 export interface ViewportConfig {
@@ -158,7 +159,8 @@ export default class FloatFactory implements Disposable {
       title: opts.title || '',
       close: opts.close ? 1 : 0,
       codes,
-      highlights
+      highlights,
+      modes: opts.modes || ['n', 'i', 'ic', 's']
     }
     if (opts.maxHeight) config.maxHeight = opts.maxHeight
     if (opts.maxWidth) config.maxWidth = opts.maxWidth
@@ -172,6 +174,7 @@ export default class FloatFactory implements Disposable {
     this.autoHide = opts.autoHide == false ? false : true
     if (this.autoHide) config.autohide = 1
     let arr = await this.nvim.call('coc#float#create_cursor_float', [this.winid, this._bufnr, lines, config])
+    if (isVim) this.nvim.command('redraw', true)
     if (!arr || arr.length == 0) {
       this.winid = null
       return

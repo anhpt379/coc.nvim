@@ -60,6 +60,7 @@ export interface RefactorConfig {
   openCommand: string
   beforeContext: number
   afterContext: number
+  saveToFile: boolean
 }
 
 export default class Refactor {
@@ -84,7 +85,8 @@ export default class Refactor {
     this.config = {
       afterContext: config.get('afterContext', 3),
       beforeContext: config.get('beforeContext', 3),
-      openCommand: config.get('openCommand', 'edit')
+      openCommand: config.get('openCommand', 'edit'),
+      saveToFile: config.get('saveToFile', true)
     }
   }
 
@@ -252,7 +254,7 @@ export default class Refactor {
       }
     } else {
       if (this.matchIds.size) {
-        nvim.call('coc#util#clearmatches', [Array.from(this.matchIds), this.winid], true)
+        nvim.call('coc#highlight#clear_matches', [this.winid, Array.from(this.matchIds)], true)
         this.matchIds.clear()
       }
       let id = 2000
@@ -378,7 +380,9 @@ export default class Refactor {
     this.changing = false
     nvim.pauseNotification()
     buffer.setOption('modified', false, true)
-    nvim.command('silent noa wa', true)
+    if (this.config.saveToFile) {
+      nvim.command('silent noa wa', true)
+    }
     this.highlightLineNr()
     await nvim.resumeNotification()
     return true
