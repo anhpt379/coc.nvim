@@ -96,10 +96,8 @@ export default class Handler {
   constructor(private nvim: Neovim) {
     this.getPreferences()
     this.requestStatusItem = window.createStatusBarItem(0, { progress: true })
-    workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('coc.preferences')) {
-        this.getPreferences()
-      }
+    workspace.onDidChangeConfiguration(() => {
+      this.getPreferences()
     })
     this.hoverFactory = new FloatFactory(nvim)
     this.disposables.push(this.hoverFactory)
@@ -123,7 +121,6 @@ export default class Handler {
         event.waitUntil(willSaveWaitUntil())
       }
     }, null, 'languageserver')
-
     events.on('BufUnload', async bufnr => {
       let refactor = this.refactorMap.get(bufnr)
       if (refactor) {
@@ -364,10 +361,11 @@ export default class Handler {
     }, true)
     if (hovers == null) return false
     let hover = hovers.find(o => Range.is(o.range))
-    if (hover && hover.range) {
-      this.nvim.call('coc#highlight#match_ranges', [winid, doc.bufnr, [hover.range], 'CocHoverRange', 99], true)
+    if (hover?.range) {
+      let win = this.nvim.createWindow(winid)
+      let ids = await win.highlightRanges('CocHoverRange', [hover.range], 99) as number[]
       setTimeout(() => {
-        this.nvim.call('coc#highlight#clear_match_group', [winid, '^CocHoverRange'], true)
+        if (ids.length) win.clearMatches(ids)
         if (workspace.isVim) this.nvim.command('redraw', true)
       }, 1000)
     }
@@ -1368,12 +1366,12 @@ export default class Handler {
 
   private getPreferences(): void {
     let config = workspace.getConfiguration('coc.preferences')
+    let signatureConfig = workspace.getConfiguration('signature')
     let hoverTarget = config.get<string>('hoverTarget', 'float')
-    if (hoverTarget == 'float' && !workspace.env.floating && !workspace.env.textprop) {
+    let signatureHelpTarget = signatureConfig.get<string>('target', 'float')
+    if (hoverTarget == 'float' && !workspace.floatSupported) {
       hoverTarget = 'preview'
     }
-    let signatureConfig = workspace.getConfiguration('signature')
-    let signatureHelpTarget = signatureConfig.get<string>('target', 'float')
     if (signatureHelpTarget == 'float' && !workspace.floatSupported) {
       signatureHelpTarget = 'echo'
     }

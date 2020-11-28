@@ -37,6 +37,7 @@ export default class Document {
   public textDocument: TextDocument
   public fireContentChanges: Function & { clear(): void }
   public fetchContent: Function & { clear(): void }
+  private ignoreChange = false
   private size = 0
   private nvim: Neovim
   private eol = true
@@ -61,7 +62,7 @@ export default class Document {
     private maxFileSize: number | null) {
     this.fireContentChanges = debounce(() => {
       this._fireContentChanges()
-    }, 200)
+    }, 100)
     this.fetchContent = debounce(() => {
       this._fetchContent().logError()
     }, 100)
@@ -155,7 +156,7 @@ export default class Document {
     this._previewwindow = opts.previewwindow
     this._winid = opts.winid
     this.size = typeof opts.size == 'number' ? opts.size : 0
-    this.variables = opts.variables
+    this.variables = opts.variables || {}
     this._changedtick = opts.changedtick
     this.eol = opts.eol == 1
     let uri = this._uri = getUri(opts.fullpath, this.bufnr, buftype, this.env.isCygwin)
@@ -209,6 +210,10 @@ export default class Document {
   ): void {
     if (buf.id !== this.buffer.id || tick == null) return
     this._changedtick = tick
+    if (this.ignoreChange) {
+      this.ignoreChange = false
+      return
+    }
     let lines = this.lines.slice(0, firstline)
     lines = lines.concat(linedata, this.lines.slice(lastline))
     this.lines = lines
@@ -242,7 +247,7 @@ export default class Document {
       if (cursor && cursor.bufnr == this.bufnr) {
         endOffset = this.getEndOffset(cursor.lnum, cursor.col, cursor.insert)
       }
-      let change = getChange(this.content, content, endOffset)
+      let change = getChange(textDocument.getText(), content, endOffset)
       if (change == null) return
       this.createDocument()
       let { version, uri } = this
@@ -325,17 +330,18 @@ export default class Document {
     }
   }
 
-  public changeLines(lines: [number, string][], sync = true, check = false): void {
+  public changeLines(lines: [number, string][], sync = true): void {
     let { nvim } = this
     let filtered: [number, string][] = []
     for (let [lnum, text] of lines) {
-      if (check && this.lines[lnum] != text) {
+      if (this.lines[lnum] != text) {
         filtered.push([lnum, text])
+        this.lines[lnum] = text
       }
-      this.lines[lnum] = text
     }
-    if (check && !filtered.length) return
-    nvim.call('coc#util#change_lines', [this.bufnr, check ? filtered : lines], true)
+    if (!filtered.length) return
+    nvim.call('coc#util#change_lines', [this.bufnr, filtered], true)
+    this.ignoreChange = true
     if (sync) this.forceSync()
   }
 
@@ -531,35 +537,9 @@ export default class Document {
   }
 
   /**
-   * Highlight ranges in document, requires textprop on vim8
-   *
-   * @param {Range} ranges List of ranges.
-   * @param {string} hlGroup Highlight group.
-   * @param {string} key Unique key for namespace.
-   */
-  public highlightRanges(ranges: Range[], hlGroup: string, key: string): void {
-    if (typeof key === 'number') {
-      logger.error(`signature for highlight ranges was changed!`)
-      return [] as any
-    }
-    for (let range of ranges) {
-      this.nvim.call('coc#highlight#range', [this.bufnr, key, hlGroup, range], true)
-    }
-  }
-
-  /**
-   * Clear namespace with key, requires textprop on vim8
-   *
-   * @param {string} key Unique key of namespace.
-   * @param {number} startLine Default to `0`, 0 based.
-   * @param {number} endLine Default to `-1` as the end.
-   */
-  public clearNamespace(key: string, startLine = 0, endLine = -1): void {
-    this.nvim.call('coc#highlight#clear_highlight', [this.bufnr, key, startLine, endLine], true)
-  }
-
-  /**
    * Get cwd of this document.
+   *
+   * @deprecated won't work when buffer not in current tab.
    */
   public async getcwd(): Promise<string> {
     let wid = await this.nvim.call('bufwinid', this.buffer.id)

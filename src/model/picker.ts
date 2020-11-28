@@ -5,7 +5,7 @@ import events from '../events'
 import { QuickPickItem } from '../types'
 import { disposeAll } from '../util'
 import { byteLength } from '../util/string'
-import Window from './window'
+import Popup from './popup'
 const logger = require('../util/logger')('model-dialog')
 const isVim = process.env.VIM_NODE_RPC == '1'
 
@@ -19,7 +19,7 @@ interface PickerConfig {
  */
 export default class Picker {
   private bufnr: number
-  private win: Window | undefined
+  private win: Popup | undefined
   private picked: Set<number> = new Set()
   private currIndex = 0
   private total: number
@@ -176,6 +176,12 @@ export default class Picker {
       let shortcut = preferences.pickerButtonShortcut
       opts.buttons = ['Submit' + (shortcut ? ' <cr>' : ''), 'Cancel' + (shortcut ? ' <esc>' : '')]
     }
+    if (preferences.confirmKey && preferences.confirmKey != '<cr>') {
+      this.addKeys(preferences.confirmKey, () => {
+        this._onDidClose.fire(undefined)
+        this.dispose()
+      })
+    }
     let lines = []
     let positions: [number, number][] = []
     for (let i = 0; i < items.length; i++) {
@@ -186,7 +192,7 @@ export default class Picker {
       lines.push(line)
     }
     let res = await nvim.call('coc#float#create_dialog', [lines, opts]) as [number, number]
-    this.win = new Window(nvim, res[0], res[1])
+    this.win = new Popup(nvim, res[0], res[1])
     this.bufnr = res[1]
     this.attachEvents()
     let buf = nvim.createBuffer(this.bufnr)

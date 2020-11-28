@@ -23,6 +23,32 @@ export interface ParsedUrlQueryInput {
   [key: string]: unknown
 }
 
+/**
+ * Represents an action that is shown with an information, warning, or
+ * error message.
+ *
+ * @see [showInformationMessage](#window.showInformationMessage)
+ * @see [showWarningMessage](#window.showWarningMessage)
+ * @see [showErrorMessage](#window.showErrorMessage)
+ */
+export interface MessageItem {
+
+  /**
+   * A short title like 'Retry', 'Open Log' etc.
+   */
+  title: string
+
+  /**
+   * A hint for modal dialogs that the item should be triggered
+   * when the user cancels the dialog (e.g. by pressing the ESC
+   * key).
+   *
+   * Note: this option is ignored for non-modal messages.
+   * Note: not used by coc.nvim for now.
+   */
+  isCloseAffordance?: boolean
+}
+
 export interface DialogButton {
   /**
    * Use by callback, should >= 0
@@ -42,6 +68,15 @@ export interface DialogPreferences {
   floatBorderHighlight?: string
   pickerButtons?: boolean
   pickerButtonShortcut?: boolean
+  confirmKey?: string
+}
+
+export interface NotificationPreferences {
+  top: number
+  right: number
+  maxWidth: number
+  maxHeight: number
+  highlight: string
 }
 
 export interface DialogConfig {
@@ -58,6 +93,34 @@ export interface DialogConfig {
    * highlight group for dialog window, default to `"dialog.floatHighlight"` or 'CocFlating'
    */
   highlight?: string
+  /**
+   * highlight groups for border, default to `"dialog.borderhighlight"` or 'CocFlating'
+   */
+  borderhighlight?: string
+  /**
+   * Buttons as bottom of dialog.
+   */
+  buttons?: DialogButton[]
+  /**
+   * index is -1 for window close without button click
+   */
+  callback?: (index: number) => void
+}
+
+export interface NotificationConfig {
+  content: string
+  /**
+   * Optional title text.
+   */
+  title?: string
+  /**
+   * Timeout in miliseconds to dismiss notification.
+   */
+  timeout?: number
+  /**
+   * show close button, default to true when not specified.
+   */
+  close?: boolean
   /**
    * highlight groups for border, default to `"dialog.borderhighlight"` or 'CocFlating'
    */
@@ -530,6 +593,8 @@ export interface DiagnosticItem {
   file: string
   lnum: number
   col: number
+  source: string
+  code: string | number
   message: string
   severity: string
   level: number
@@ -889,9 +954,13 @@ export interface LocationWithLine {
 export interface ListItem {
   label: string
   filterText?: string
+  /**
+   * A string that should be used when comparing this item
+   * with other items, only used for fuzzy filter.
+   */
+  sortText?: string
   location?: Location | LocationWithLine | string
   data?: any
-  recentScore?: number
   ansiHighlights?: AnsiHighlight[]
   resolved?: boolean
 }
@@ -902,6 +971,10 @@ export interface ListHighlights {
   hlGroup?: string
 }
 
+export interface ListItemWithHighlights extends ListItem {
+  highlights?: ListHighlights
+}
+
 export interface AnsiHighlight {
   // column indexes, end exclusive
   span: [number, number]
@@ -910,7 +983,6 @@ export interface AnsiHighlight {
 
 export interface ListItemsEvent {
   items: ListItem[]
-  highlights: ListHighlights[]
   finished: boolean
   append?: boolean
   reload?: boolean
@@ -980,6 +1052,10 @@ export interface IList {
    * Default action name.
    */
   defaultAction: string
+  /**
+   * Sort the result items by fzy score, default false.
+   */
+  fzySort?: boolean
   /**
    * Load list items.
    */
@@ -1058,6 +1134,10 @@ export interface DownloadOptions extends FetchOptions {
    * Folder that contains downloaded file or extracted files by untar or unzip
    */
   dest: string
+  /**
+   * Remove the specified number of leading path elements for *untar* only, default to `1`.
+   */
+  strip?: number
   /**
    * If true, use untar for `.tar.gz` filename
    */

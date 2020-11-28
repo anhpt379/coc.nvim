@@ -137,21 +137,22 @@ export class DiagnosticManager implements Disposable {
     workspace.configurations.onError(() => {
       this.setConfigurationErrors()
     }, null, this.disposables)
-    let { enableHighlightLineNumber } = this.config
-    if (!workspace.isNvim || semver.lt(workspace.env.version, 'v0.3.2')) {
-      enableHighlightLineNumber = false
-    }
+  }
+
+  private defineSigns(): void {
+    let { nvim } = this
+    let { enableHighlightLineNumber, enableSign } = this.config
+    if (!enableSign) return
     nvim.pauseNotification()
-    if (this.config.enableSign) {
-      for (let kind of ['Error', 'Warning', 'Info', 'Hint']) {
-        let signText = this.config[kind.toLowerCase() + 'Sign']
-        let cmd = `sign define Coc${kind} linehl=Coc${kind}Line`
-        if (signText) cmd += ` texthl=Coc${kind}Sign text=${signText}`
-        if (enableHighlightLineNumber) cmd += ` numhl=Coc${kind}Sign`
-        nvim.command(cmd, true)
-      }
+    for (let kind of ['Error', 'Warning', 'Info', 'Hint']) {
+      let signText = this.config[kind.toLowerCase() + 'Sign']
+      let cmd = `sign define Coc${kind} linehl=Coc${kind}Line`
+      if (signText) cmd += ` texthl=Coc${kind}Sign text=${signText}`
+      if (enableHighlightLineNumber) cmd += ` numhl=Coc${kind}Sign`
+      nvim.command(cmd, true)
     }
-    nvim.resumeNotification(false, true).logError()
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    nvim.resumeNotification(false, true)
   }
 
   private createDiagnosticBuffer(doc: Document): void {
@@ -425,7 +426,9 @@ export class DiagnosticManager implements Disposable {
             file,
             lnum: start.line + 1,
             col: start.character + 1,
-            message: `[${diagnostic.source || collection.name}${diagnostic.code ? ' ' + diagnostic.code : ''}] ${diagnostic.message}`,
+            code: diagnostic.code,
+            source: diagnostic.source || collection.name,
+            message: diagnostic.message,
             severity: getSeverityName(diagnostic.severity),
             level: diagnostic.severity || 0,
             location: Location.create(uri, diagnostic.range)
@@ -590,13 +593,17 @@ export class DiagnosticManager implements Disposable {
     if (messageTarget == 'float' && !workspace.env.floating && !workspace.env.textprop) {
       messageTarget = 'echo'
     }
+    let enableHighlightLineNumber = config.get<boolean>('enableHighlightLineNumber', true)
+    if (!workspace.isNvim || semver.lt(workspace.env.version, 'v0.3.2')) {
+      enableHighlightLineNumber = false
+    }
     this.config = {
       messageTarget,
+      enableHighlightLineNumber,
       virtualTextSrcId: workspace.createNameSpace('diagnostic-virtualText'),
       checkCurrentLine: config.get<boolean>('checkCurrentLine', false),
       enableSign: workspace.env.sign && config.get<boolean>('enableSign', true),
       locationlistUpdate: config.get<boolean>('locationlistUpdate', true),
-      enableHighlightLineNumber: config.get<boolean>('enableHighlightLineNumber', true),
       maxWindowHeight: config.get<number>('maxWindowHeight', 10),
       maxWindowWidth: config.get<number>('maxWindowWidth', 80),
       enableMessage: config.get<string>('enableMessage', 'always'),
@@ -618,12 +625,13 @@ export class DiagnosticManager implements Disposable {
       filetypeMap: config.get<object>('filetypeMap', {}),
       showUnused: config.get<boolean>('showUnused', true),
       showDeprecated: config.get<boolean>('showDeprecated', true),
-      format: config.get<string>('format', '[%source%code] [%severity] %message')
+      format: config.get<string>('format', '[%source%code] [%severity] %message'),
     }
     this.enabled = config.get<boolean>('enable', true)
     if (this.config.displayByAle) {
       this.enabled = false
     }
+    this.defineSigns()
   }
 
   public getCollectionByName(name: string): DiagnosticCollection {

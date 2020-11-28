@@ -1,11 +1,10 @@
 import { Neovim } from '@chemzqm/neovim'
-import { Range } from 'vscode-languageserver-protocol'
 const isVim = process.env.VIM_NODE_RPC == '1'
 
 /**
- * Wrapper for float window
+ * More methods for float window/popup
  */
-export default class Window {
+export default class Popup {
   constructor(
     private nvim: Neovim,
     public readonly winid,
@@ -16,26 +15,6 @@ export default class Window {
     return this.nvim.call('coc#float#valid', [this.winid]).then(res => {
       return !!res
     })
-  }
-
-  /**
-   * Add matches for ranges by matchaddpos.
-   *
-   * @param {Range[]} ranges List of range.
-   * @param {string} hlGroup Highlight group.
-   * @param {number} priority Optional priority, default to 10
-   */
-  public addMatches(ranges: Range[], hlGroup: string, priority = 10): void {
-    this.nvim.call('coc#highlight#match_ranges', [this.winid, this.bufnr, ranges, hlGroup, priority], true)
-  }
-
-  /**
-   * Clear window matches by highlight group.
-   *
-   * @param {string} hlGroup
-   */
-  public clearMatchByGroup(hlGroup: string): void {
-    this.nvim.call('coc#highlight#clear_match_group', [this.winid, '^' + hlGroup], true)
   }
 
   public close(): void {
@@ -78,7 +57,8 @@ export default class Window {
     this.execute(`normal! ${botline}Gzt`)
     this.refreshScrollbar()
     nvim.command('redraw', true)
-    await nvim.resumeNotification()
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    nvim.resumeNotification(false, true)
   }
 
   /**

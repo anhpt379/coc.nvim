@@ -25,6 +25,7 @@ interface ArgumentItem {
 }
 
 interface PreviewConfig {
+  winid: number
   position: string
   hlGroup: string
   maxHeight: number
@@ -33,6 +34,7 @@ interface PreviewConfig {
   lnum: number
   filetype?: string
   range?: Range
+  scheme?: string
 }
 
 export default abstract class BasicList implements IList, Disposable {
@@ -46,6 +48,10 @@ export default abstract class BasicList implements IList, Disposable {
 
   constructor(protected nvim: Neovim) {
     this.config = new ListConfiguration()
+  }
+
+  public get alignColumns(): boolean {
+    return this.config.get('alignColumns', false)
   }
 
   protected get hlGroup(): string {
@@ -207,19 +213,25 @@ export default abstract class BasicList implements IList, Disposable {
     let u = URI.parse(uri)
     let lines: string[] = []
     if (doc) {
-      lines = doc.getLines(0, range.end.line + this.previewHeight)
+      lines = doc.getLines(0, range.end.line + 60)
     } else if (u.scheme == 'file') {
-      lines = await readFileLines(u.fsPath, 0, range.end.line + 30)
+      try {
+        lines = await readFileLines(u.fsPath, 0, range.end.line + 60)
+      } catch (e) {
+        [`Error on read file ${u.fsPath}`, e.message]
+      }
     }
     let config: PreviewConfig = {
+      winid: context.window.id,
       range: emptyRange(range) ? null : range,
       lnum: range.start.line + 1,
-      name: u.scheme == 'file' ? u.fsPath : '',
+      name: u.scheme == 'file' ? u.fsPath : uri,
       filetype: doc ? doc.filetype : this.getFiletype(u.fsPath),
       position: context.options.position,
       maxHeight: this.previewHeight,
       splitRight: this.splitRight,
       hlGroup: this.hlGroup,
+      scheme: u.scheme,
     }
     await nvim.call('coc#list#preview', [lines, config])
     if (workspace.isVim) nvim.command('redraw', true)
@@ -229,6 +241,7 @@ export default abstract class BasicList implements IList, Disposable {
     let { nvim } = this
     let { bufname, filetype, range, lines, lnum } = options
     let config: PreviewConfig = {
+      winid: context.window.id,
       lnum: range ? range.start.line + 1 : lnum || 1,
       filetype: filetype || 'txt',
       position: context.options.position,

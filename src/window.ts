@@ -2,27 +2,27 @@ import { Neovim } from '@chemzqm/neovim'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import semver from 'semver'
 import { CancellationToken, Disposable, Position } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
+import { NotificationConfig, NotificationPreferences } from '.'
+import channels from './channels'
 import events from './events'
 import Dialog from './model/dialog'
 import Menu from './model/menu'
-import channels from './channels'
-import StatusLine from './model/status'
 import Picker from './model/picker'
-import { DialogConfig, MessageLevel, MsgTypes, OpenTerminalOption, OutputChannel, StatusBarItem, StatusItemOption, TerminalResult } from './types'
+import Notification from './model/notification'
+import StatusLine from './model/status'
+import { DialogConfig, DialogPreferences, MessageItem, MessageLevel, MsgTypes, OpenTerminalOption, OutputChannel, QuickPickItem, ScreenPosition, StatusBarItem, StatusItemOption, TerminalResult } from './types'
 import { CONFIG_FILE_NAME, disposeAll } from './util'
 import { Mutex } from './util/mutex'
 import workspace from './workspace'
-import { DialogPreferences, ScreenPosition, QuickPickItem } from './types'
 const logger = require('./util/logger')('window')
 
 class Window {
   private mutex = new Mutex()
   private statusLine: StatusLine
 
-  private get nvim(): Neovim {
+  public get nvim(): Neovim {
     return workspace.nvim
   }
 
@@ -36,6 +36,7 @@ class Window {
     if (this.mutex.busy || !this.nvim) return
     let { messageLevel } = this
     let method = process.env.VIM_NODE_RPC == '1' ? 'callTimer' : 'call'
+    if (global.hasOwnProperty('__TEST__')) console.log(msg)
     let hl = 'Error'
     let level = MessageLevel.Error
     switch (messageType) {
@@ -88,7 +89,7 @@ class Window {
     try {
       let title = placeholder + ':'
       items = items.map((s, idx) => `${idx + 1}. ${s}`)
-      let res = await this.nvim.callAsync('coc#util#quickpick', [title, items])
+      let res = await this.nvim.callAsync('coc#util#quickpick', [title, items.map(s => s.trim())])
       release()
       let n = parseInt(res, 10)
       if (isNaN(n) || n <= 0 || n > items.length) return -1
@@ -116,7 +117,7 @@ class Window {
         return undefined
       }
       try {
-        let menu = new Menu(this.nvim, { items, title }, token)
+        let menu = new Menu(this.nvim, { items: items.map(s => s.trim()), title }, token)
         let promise = new Promise<number>(resolve => {
           menu.onDidClose(selected => {
             resolve(selected)
@@ -195,10 +196,14 @@ class Window {
   public async requestInput(title: string, defaultValue?: string): Promise<string> {
     let { nvim } = this
     const preferences = workspace.getConfiguration('coc.preferences')
-    if (workspace.isNvim && semver.gte(workspace.env.version, '0.4.0') && preferences.get<boolean>('promptInput', true)) {
+    if (workspace.env.dialog && preferences.get<boolean>('promptInput', true)) {
       let release = await this.mutex.acquire()
+      let preferences = this.dialogPreference
       try {
-        let arr = await nvim.call('coc#float#create_prompt_win', [title, defaultValue || '']) as [number, number]
+        let opts: any = {}
+        if (preferences.floatHighlight) opts.highlight = preferences.floatHighlight
+        if (preferences.floatBorderHighlight) opts.borderhighlight = preferences.floatBorderHighlight
+        let arr = await nvim.call('coc#float#create_prompt_win', [title, defaultValue || '', opts]) as [number, number]
         let [bufnr, winid] = arr
         let res = await new Promise<string>(resolve => {
           let disposables: Disposable[] = []
@@ -225,14 +230,15 @@ class Window {
         logger.error('Error on requestInput:', e)
         release()
       }
+    } else {
+      let res = await workspace.callAsync<string>('input', [title + ': ', defaultValue || ''])
+      nvim.command('normal! :<C-u>', true)
+      if (!res) {
+        this.showMessage('Empty word, canceled', 'warning')
+        return null
+      }
+      return res
     }
-    let res = await workspace.callAsync<string>('input', [title + ': ', defaultValue || ''])
-    nvim.command('normal! :<C-u>', true)
-    if (!res) {
-      this.showMessage('Empty word, canceled', 'warning')
-      return null
-    }
-    return res
   }
 
   /**
@@ -335,7 +341,7 @@ class Window {
    * @returns Cursor screen position.
    */
   public async getCursorScreenPosition(): Promise<ScreenPosition> {
-    let [row, col] = await this.nvim.call('coc#float#win_position') as [number, number]
+    let [row, col] = await this.nvim.call('coc#util#cursor_pos') as [number, number]
     return { row, col }
   }
 
@@ -381,6 +387,86 @@ class Window {
     }
   }
 
+  /**
+   * Show an information message to users. Optionally provide an array of items which will be presented as
+   * clickable buttons.
+   *
+   * @param message The message to show.
+   * @param items A set of items that will be rendered as actions in the message.
+   * @return Promise that resolves to the selected item or `undefined` when being dismissed.
+   */
+  public async showInformationMessage(message: string, ...items: string[]): Promise<string | undefined>
+  public async showInformationMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
+  public async showInformationMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
+    let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
+    let idx = await this.createNotification('CocInfoFloat', message, texts)
+    return idx == -1 ? undefined : items[idx]
+  }
+
+  /**
+   * Show an warning message to users. Optionally provide an array of items which will be presented as
+   * clickable buttons.
+   *
+   * @param message The message to show.
+   * @param items A set of items that will be rendered as actions in the message.
+   * @return Promise that resolves to the selected item or `undefined` when being dismissed.
+   */
+  public async showWarningMessage(message: string, ...items: string[]): Promise<string | undefined>
+  public async showWarningMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
+  public async showWarningMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
+    let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
+    let idx = await this.createNotification('CocWarningFloat', message, texts)
+    return idx == -1 ? undefined : items[idx]
+  }
+
+  /**
+   * Show an error message to users. Optionally provide an array of items which will be presented as
+   * clickable buttons.
+   *
+   * @param message The message to show.
+   * @param items A set of items that will be rendered as actions in the message.
+   * @return Promise that resolves to the selected item or `undefined` when being dismissed.
+   */
+  public async showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>
+  public async showErrorMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
+  public async showErrorMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
+    let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
+    let idx = await this.createNotification('CocErrorFloat', message, texts)
+    return idx == -1 ? undefined : items[idx]
+  }
+
+  public async showNotification(config: NotificationConfig): Promise<boolean> {
+    let notification = new Notification(this.nvim, config)
+    return await notification.show(this.notificationPreference)
+  }
+
+  private createNotification(borderhighlight: string, message: string, items: string[]): Promise<number> {
+    return new Promise(resolve => {
+      let config: NotificationConfig = {
+        content: message,
+        borderhighlight,
+        close: true,
+        buttons: items.map((s, index) => {
+          return { text: s, index }
+        }),
+        callback: idx => {
+          resolve(idx)
+        }
+      }
+      let notification = new Notification(this.nvim, config)
+      notification.show(this.notificationPreference).then(shown => {
+        if (!shown) {
+          logger.error('Unable to open notification window')
+          resolve(-1)
+        }
+        if (!items.length) resolve(-1)
+      }, e => {
+        logger.error('Unable to open notification window', e)
+        resolve(-1)
+      })
+    })
+  }
+
   private get dialogPreference(): DialogPreferences {
     let config = workspace.getConfiguration('dialog')
     return {
@@ -390,6 +476,18 @@ class Window {
       floatBorderHighlight: config.get<string>('floatBorderHighlight'),
       pickerButtons: config.get<boolean>('pickerButtons'),
       pickerButtonShortcut: config.get<boolean>('pickerButtonShortcut'),
+      confirmKey: config.get<string>('confirmKey'),
+    }
+  }
+
+  private get notificationPreference(): NotificationPreferences {
+    let config = workspace.getConfiguration('notification')
+    return {
+      top: config.get<number>('marginTop'),
+      right: config.get<number>('marginRight'),
+      maxWidth: config.get<number>('maxWidth'),
+      maxHeight: config.get<number>('maxHeight'),
+      highlight: config.get<string>('highlightGroup'),
     }
   }
 

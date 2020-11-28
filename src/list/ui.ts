@@ -2,11 +2,11 @@ import { Buffer, Neovim, Window } from '@chemzqm/neovim'
 import debounce from 'debounce'
 import { CancellationToken, Disposable, Emitter, Event } from 'vscode-languageserver-protocol'
 import events from '../events'
-import { ListHighlights, ListItem, ListOptions } from '../types'
+import { ListItem, ListItemWithHighlights, ListOptions } from '../types'
 import { disposeAll } from '../util'
 import { Mutex } from '../util/mutex'
-import workspace from '../workspace'
 import window from '../window'
+import workspace from '../workspace'
 import ListConfiguration from './configuration'
 const logger = require('../util/logger')('list-ui')
 
@@ -19,6 +19,12 @@ export interface MousePosition {
   current: boolean
 }
 
+export interface HighlightGroup {
+  hlGroup: string
+  priority: number
+  pos: [number, number, number]
+}
+
 export default class ListUI {
   private window: Window
   private height: number
@@ -26,10 +32,10 @@ export default class ListUI {
   private buffer: Buffer
   private currIndex = 0
   private drawCount = 0
-  private highlights: ListHighlights[] = []
-  private items: ListItem[] = []
+  private items: ListItemWithHighlights[] = []
   private disposables: Disposable[] = []
   private signOffset: number
+  private matchHighlightGroup: string
   private selected: Set<number> = new Set()
   private mouseDown: MousePosition
   private mutex: Mutex = new Mutex()
@@ -51,6 +57,7 @@ export default class ListUI {
     private config: ListConfiguration
   ) {
     this.signOffset = config.get<number>('signOffset')
+    this.matchHighlightGroup = config.get<string>('matchHighlightGroup', 'Search')
     this.newTab = listOptions.position == 'tab'
     events.on('BufWinLeave', async bufnr => {
       if (bufnr != this.bufnr || this.window == null) return
@@ -70,7 +77,8 @@ export default class ListUI {
       nvim.pauseNotification()
       this.doHighlight(start - 1, end)
       nvim.command('redraw', true)
-      await nvim.resumeNotification(false, true)
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      nvim.resumeNotification(false, true)
     }, 100)
     this.disposables.push({
       dispose: () => {
@@ -341,7 +349,9 @@ export default class ListUI {
     release()
     if (token && token.isCancellationRequested) return
     if (count !== this.drawCount) return
-    let lines = this.items.map(item => item.label)
+
+    const lines = this.items.map(item => item.label)
+
     this.clearSelection()
     let newIndex = reload ? this.currIndex : 0
     await this.setLines(lines, false, newIndex)
@@ -360,23 +370,22 @@ export default class ListUI {
 
   private async setLines(lines: string[], append = false, index: number): Promise<void> {
     let { nvim, buffer, window } = this
-    let statusSegments: Array<String> | null = this.config.get('statusLineSegments')
     if (!buffer || !window) return
     nvim.pauseNotification()
-    nvim.call('coc#util#win_gotoid', [window.id], true)
     if (!append) {
+      let statusSegments: Array<String> | null = this.config.get('statusLineSegments')
       if (statusSegments) {
         window.notify('nvim_win_set_option', ['statusline', statusSegments.join(" ")])
       }
-      nvim.call('clearmatches', [], true)
+      nvim.call('coc#compat#clear_matches', [window.id], true)
       if (!lines.length) {
         lines = ['No results, press ? on normal mode to get help.']
-        nvim.call('matchaddpos', ['Comment', [[1]], 99], true)
+        nvim.call('coc#compat#matchaddpos', ['Comment', [[1]], 99, this.window.id], true)
       }
     }
     buffer.setOption('modifiable', true, true)
     if (workspace.isVim) {
-      nvim.call('coc#list#setlines', [lines, append], true)
+      nvim.call('coc#list#setlines', [buffer.id, lines, append], true)
     } else {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       buffer.setLines(lines, { start: append ? -1 : 0, end: -1, strictIndexing: false }, true)
@@ -393,7 +402,6 @@ export default class ListUI {
       window.notify('nvim_win_set_cursor', [[index + 1, 0]])
     }
     nvim.command('redraws', true)
-    if (workspace.isVim) nvim.command('redraw', true)
     let res = await nvim.resumeNotification()
     if (Array.isArray(res[1]) && res[1][0] == 0) {
       this.window = null
@@ -440,23 +448,24 @@ export default class ListUI {
 
   private doHighlight(start: number, end: number): void {
     let { nvim } = workspace
-    let { highlights, items } = this
+    let { items } = this
+    let groups: HighlightGroup[] = []
     for (let i = start; i <= Math.min(end, items.length - 1); i++) {
-      let { ansiHighlights } = items[i]
-      let highlight = highlights[i]
+      let { ansiHighlights, highlights } = items[i]
       if (ansiHighlights) {
         for (let hi of ansiHighlights) {
           let { span, hlGroup } = hi
-          nvim.call('matchaddpos', [hlGroup, [[i + 1, span[0] + 1, span[1] - span[0]]], 9], true)
+          groups.push({ hlGroup, priority: 9, pos: [i + 1, span[0] + 1, span[1] - span[0]] })
         }
       }
-      if (highlight) {
-        let { spans, hlGroup } = highlight
+      if (highlights && Array.isArray(highlights.spans)) {
+        let { spans, hlGroup } = highlights
         for (let span of spans) {
-          nvim.call('matchaddpos', [hlGroup || 'Search', [[i + 1, span[0] + 1, span[1] - span[0]]], 11], true)
+          groups.push({ hlGroup: hlGroup || this.matchHighlightGroup, priority: 11, pos: [i + 1, span[0] + 1, span[1] - span[0]] })
         }
       }
     }
+    nvim.call('coc#compat#matchaddgroups', [this.window.id, groups], true)
   }
 
   public setCursor(lnum: number, col: number): void {
@@ -466,17 +475,6 @@ export default class ListUI {
     // change index since CursorMoved event not fired (seems bug of neovim)!
     this.onLineChange(lnum - 1)
     if (window) window.notify('nvim_win_set_cursor', [[lnum, col]])
-  }
-
-  public addHighlights(highlights: ListHighlights[], append = false): void {
-    let { limitLines } = this
-    if (!append) {
-      this.highlights = highlights.slice(0, limitLines)
-    } else {
-      if (this.highlights.length < limitLines) {
-        this.highlights.push(...highlights.slice(0, limitLines - this.highlights.length))
-      }
-    }
   }
 
   private async getSelectedRange(): Promise<[number, number]> {

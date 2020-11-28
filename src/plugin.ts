@@ -23,7 +23,7 @@ const logger = require('./util/logger')('plugin')
 
 export default class Plugin extends EventEmitter {
   private _ready = false
-  private handler: Handler
+  private handler: Handler | undefined
   private infoChannel: OutputChannel
   private cursors: Cursors
   private actions: Map<string, Function> = new Map()
@@ -123,10 +123,11 @@ export default class Plugin extends EventEmitter {
     this.addAction('detach', () => {
       return workspace.detach()
     })
-    this.addAction('doKeymap', async (key: string, defaultReturn = '') => {
+    this.addAction('doKeymap', async (key: string, defaultReturn = '', pressed?: string) => {
       let keymap = workspace.keymaps.get(key)
       if (!keymap) {
         logger.error(`keymap for ${key} not found`)
+        this.nvim.command(`silent! unmap <buffer> ${pressed.startsWith('{') && pressed.endsWith('}') ? `<${pressed.slice(1, -1)}>` : pressed}`, true)
         return defaultReturn
       }
       let [fn, repeat] = keymap
@@ -400,6 +401,7 @@ export default class Plugin extends EventEmitter {
     try {
       await extensions.init()
       await workspace.init()
+      languages.init()
       for (let item of workspace.env.vimCommands) {
         this.addCommand(item)
       }
@@ -453,6 +455,7 @@ export default class Plugin extends EventEmitter {
 
   public async cocAction(method: string, ...args: any[]): Promise<any> {
     let fn = this.actions.get(method)
+    if (!fn) throw new Error(`Action "${method}" not exists`)
     return await Promise.resolve(fn.apply(null, args))
   }
 

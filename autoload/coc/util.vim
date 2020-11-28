@@ -194,6 +194,13 @@ function! coc#util#jumpTo(line, character) abort
   call cursor(a:line + 1, col)
 endfunction
 
+" Position of cursor relative to editor
+function! coc#util#cursor_pos() abort
+  let nr = winnr()
+  let [row, col] = win_screenpos(nr)
+  return [row + winline() - 2, col + wincol() - 2]
+endfunction
+
 function! coc#util#echo_messages(hl, msgs)
   if a:hl !~# 'Error' && (mode() !~# '\v^(i|n)$')
     return
@@ -248,12 +255,12 @@ function! coc#util#get_bufoptions(bufnr, maxFileSize) abort
   return {
         \ 'bufname': bufname,
         \ 'size': size,
-        \ 'eol': getbufvar(a:bufnr, '&eol'),
         \ 'buftype': buftype,
         \ 'winid': winid,
         \ 'previewwindow': previewwindow == 0 ? v:false : v:true,
         \ 'variables': s:variables(a:bufnr),
         \ 'fullpath': empty(bufname) ? '' : fnamemodify(bufname, ':p'),
+        \ 'eol': getbufvar(a:bufnr, '&eol'),
         \ 'filetype': getbufvar(a:bufnr, '&filetype'),
         \ 'iskeyword': getbufvar(a:bufnr, '&iskeyword'),
         \ 'changedtick': getbufvar(a:bufnr, 'changedtick'),
@@ -262,8 +269,8 @@ function! coc#util#get_bufoptions(bufnr, maxFileSize) abort
 endfunction
 
 function! s:variables(bufnr) abort
-  let info = getbufinfo({'bufnr':a:bufnr, 'variables': 1})
-  let variables = copy(info[0]['variables'])
+  let info = getbufinfo(a:bufnr)
+  let variables = empty(info) ? {} : copy(info[0]['variables'])
   for key in keys(variables)
     if key !~# '\v^coc'
       unlet variables[key]
@@ -416,6 +423,7 @@ function! coc#util#quickpick(title, items, cb) abort
         \ 'filter': function('s:QuickpickFilter'),
         \ 'callback': function('s:QuickpickHandler'),
         \ })
+      redraw
     catch /.*/
       call a:cb(v:exception)
     endtry
@@ -868,6 +876,7 @@ function! coc#util#open_files(files)
   " added on latest vim8
   if exists('*bufadd') && exists('*bufload')
     for file in a:files
+      let file = fnamemodify(file, ':.')
       if bufloaded(file)
         call add(bufnrs, bufnr(file))
       else
@@ -880,6 +889,7 @@ function! coc#util#open_files(files)
   else
     noa keepalt 1new +setl\ bufhidden=wipe
     for file in a:files
+      let file = fnamemodify(file, ':.')
       execute 'noa edit +setl\ bufhidden=hide '.fnameescape(file)
       if &filetype ==# ''
         filetype detect
@@ -956,20 +966,5 @@ function! coc#util#win_gotoid(winid) abort
   noa let res = win_gotoid(a:winid)
   if res == 0
     throw 'Invalid window number'
-  endif
-endfunction
-
-function! coc#util#check_mode(modes) abort
-  let mode = mode()
-  if index(a:modes, mode) < 0
-    throw 'Invalid mode '.mode
-  endif
-endfunction
-
-" Make sure pum is visible
-function! coc#util#pumvisible() abort
-  let visible = pumvisible()
-  if !visible
-    throw 'Pum not visible'
   endif
 endfunction

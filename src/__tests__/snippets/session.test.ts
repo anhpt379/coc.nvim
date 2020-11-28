@@ -44,6 +44,17 @@ describe('SnippetSession#start', () => {
     expect(line).toBe('bar')
   })
 
+  it('should insert placeholder with default value', async () => {
+    let buf = await helper.edit()
+    await helper.wait(30)
+    await nvim.input('i')
+    let session = new SnippetSession(nvim, buf.id)
+    let res = await session.start('a${TM_SELECTED_TEXT:return}b')
+    expect(res).toBe(false)
+    let line = await nvim.line
+    expect(line).toBe('areturnb')
+  })
+
   it('should fix indent of next line when necessary', async () => {
     let buf = await helper.edit()
     await nvim.setLine('  ab')
@@ -222,6 +233,21 @@ describe('SnippetSession#start', () => {
     await helper.wait(30)
     let col = await nvim.call('col', '.')
     expect(col).toBe(3)
+  })
+
+  it('should indent multiple lines variable text', async () => {
+    let text = 'abc\n  def'
+    await nvim.setVar('coc_selected_text', text)
+    let buf = await helper.edit()
+    await nvim.input('i')
+    let session = new SnippetSession(nvim, buf.id)
+    await session.start('fun\n  ${0:${TM_SELECTED_TEXT:return}}\nend')
+    await helper.wait(30)
+    let lines = await buf.lines
+    expect(lines.length).toBe(4)
+    expect(lines).toEqual([
+      'fun', '  abc', '    def', 'end'
+    ])
   })
 })
 

@@ -13,19 +13,19 @@ function! coc#list#getchar() abort
   return coc#prompt#getchar()
 endfunction
 
-function! coc#list#setlines(lines, append)
+function! coc#list#setlines(bufnr, lines, append)
   if a:append
-    silent call append(line('$'), a:lines)
+    silent call appendbufline(a:bufnr, '$', a:lines)
   else
-    silent call append(0, a:lines)
     if exists('*deletebufline')
-      call deletebufline('%', len(a:lines) + 1, '$')
+      call deletebufline(a:bufnr, len(a:lines) + 1, '$')
     else
       let n = len(a:lines) + 1
       let saved_reg = @"
       silent execute n.',$d'
       let @" = saved_reg
     endif
+    silent call setbufline(a:bufnr, 1, a:lines)
   endif
 endfunction
 
@@ -208,6 +208,7 @@ endfunction
 " Improve preview performance by reused window & buffer.
 " lines - list of lines
 " config.position - could be 'below' 'top' 'tab'.
+" config.winid - id of original window.
 " config.name - (optional )name of preview buffer.
 " config.splitRight - (optional) split to right when 1.
 " config.lnum - (optional) current line number
@@ -219,19 +220,29 @@ function! coc#list#preview(lines, config) abort
     echoerr 'win_execute function required for preview, please upgrade your vim.'
     return
   endif
-  let winid = coc#list#get_preview(0)
-  if empty(a:lines)
-    call s:close_win(winid)
-    return
+  let name = fnamemodify(get(a:config, 'name', ''), ':.')
+  let lines = a:lines
+  if empty(lines)
+    if get(a:config, 'scheme', 'file') != 'file'
+      let bufnr = s:load_buffer(name)
+      if bufnr != 0
+        let lines = getbufline(bufnr, 1, '$')
+      else
+        let lines = ['']
+      endif
+    else
+      " Show empty lines so not close window.
+      let lines = ['']
+    endif
   endif
+  let winid = coc#list#get_preview(0)
   let bufnr = winid == -1 ? 0 : winbufnr(winid)
   " Try reuse buffer & window
-  let bufnr = coc#float#create_buf(bufnr, a:lines)
+  let bufnr = coc#float#create_buf(bufnr, lines)
   if bufnr == 0
     return
   endif
   call setbufvar(bufnr, '&synmaxcol', 500)
-  let name = get(a:config, 'name', '')
   let filetype = get(a:config, 'filetype', '')
   let extname = matchstr(name, '\.\zs[^.]\+$')
   if empty(filetype) && !empty(extname)
@@ -241,24 +252,28 @@ function! coc#list#preview(lines, config) abort
   let hlGroup = get(a:config, 'hlGroup', 'Search')
   let lnum = get(a:config, 'lnum', 1)
   let position = get(a:config, 'position', 'below')
+  let original = get(a:config, 'winid', -1)
   if winid == -1
     let change = position != 'tab' && get(a:config, 'splitRight', 0)
     let curr = win_getid()
-    "noa above sb +5 52
     if change
-      noa wincmd t
-      execute 'noa belowright vnew +b\ '.bufnr
+      if original && win_id2win(original)
+        call win_gotoid(original)
+      else
+        noa wincmd t
+      endif
+      execute 'noa belowright vert sb '.bufnr
       let winid = win_getid()
     elseif position == 'tab' || get(a:config, 'splitRight', 0)
-      execute 'noa belowright vnew +b\ '.bufnr
+      execute 'noa belowright vert sb '.bufnr
       let winid = win_getid()
     else
       let mod = position == 'top' ? 'below' : 'above'
-      let height = s:get_height(a:lines, a:config)
-      execute 'noa '.mod.' '.height.'new +b\ '.bufnr
+      let height = s:get_height(lines, a:config)
+      execute 'noa '.mod.' sb +resize\ '.height.' '.bufnr
       let winid = win_getid()
     endif
-    execute 'noa exe '.lnum
+    noa call winrestview({"lnum": lnum ,"topline":max([1, lnum - 3])})
     call setwinvar(winid, '&signcolumn', 'no')
     call setwinvar(winid, '&number', 1)
     call setwinvar(winid, '&cursorline', 0)
@@ -266,7 +281,7 @@ function! coc#list#preview(lines, config) abort
     call setwinvar(winid, 'previewwindow', 1)
     noa call win_gotoid(curr)
   else
-    let height = s:get_height(a:lines, a:config)
+    let height = s:get_height(lines, a:config)
     if height > 0
       if s:is_vim
         let curr = win_getid()
@@ -277,7 +292,7 @@ function! coc#list#preview(lines, config) abort
         call nvim_win_set_height(winid, height)
       endif
     endif
-    call coc#float#execute(winid, ['syntax clear', 'noa call winrestview({"lnum":'.lnum.',"topline":'.max([1, lnum - 3]).'})'])
+    call coc#compat#execute(winid, ['syntax clear', 'noa call winrestview({"lnum":'.lnum.',"topline":'.max([1, lnum - 3]).'})'])
   endif
   if s:prefix.' '.name != bufname(bufnr)
     if s:is_vim
@@ -289,19 +304,18 @@ function! coc#list#preview(lines, config) abort
   " highlights
   if !empty(filetype)
     let start = max([0, lnum - 300])
-    let end = min([len(a:lines), lnum + 300])
+    let end = min([len(lines), lnum + 300])
     call coc#highlight#highlight_lines(winid, [{'filetype': filetype, 'startLine': start, 'endLine': end}])
-    call coc#float#execute(winid, 'syn sync fromstart')
-    "call coc#float#execute(winid, 'setfiletype '.filetype)
+    call coc#compat#execute(winid, 'syn sync fromstart')
   else
-    call coc#float#execute(winid, 'filetype detect')
+    call coc#compat#execute(winid, 'filetype detect')
     let ft = getbufvar(bufnr, '&filetype', '')
     if !empty(extname) && !empty(ft)
       let s:filetype_map[extname] = ft
     endif
   endif
   call sign_unplace('coc', {'buffer': bufnr})
-  call coc#float#execute(winid, 'call clearmatches()')
+  call coc#compat#execute(winid, 'call clearmatches()')
   if !empty(range)
     call sign_place(1, 'coc', 'CocCurrentLine', bufnr, {'lnum': lnum})
     call coc#highlight#match_ranges(winid, bufnr, [range], hlGroup, 10)
@@ -315,4 +329,13 @@ function! s:get_height(lines, config) abort
   endif
   let height = min([get(a:config, 'maxHeight', 10), len(a:lines), &lines - &cmdheight - 2])
   return height
+endfunction
+
+function! s:load_buffer(name) abort
+  if exists('*bufadd') && exists('*bufload')
+    let bufnr = bufadd(a:name)
+    call bufload(bufnr)
+    return bufnr
+  endif
+  return 0
 endfunction

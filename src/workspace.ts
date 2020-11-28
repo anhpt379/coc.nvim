@@ -28,7 +28,7 @@ import { findUp, fixDriver, inDirectory, isFile, isParentFolder, readFileLine, r
 import { CONFIG_FILE_NAME, disposeAll, getKeymapModifier, platform, runCommand, wait } from './util/index'
 import { score } from './util/match'
 import { equals } from './util/object'
-import { comparePosition, getChangedFromEdits } from './util/position'
+import { getChangedFromEdits } from './util/position'
 import { byteIndex, byteLength } from './util/string'
 import Watchman from './watchman'
 import window from './window'
@@ -155,6 +155,7 @@ export class Workspace implements IWorkspace {
       this._insertMode = false
     }, null, this.disposables)
     events.on('BufWinLeave', (_, winid) => {
+      if (winid == -1) return
       this.nvim.call('coc#highlight#clear_match_group', [winid, '^Coc'], true)
     }, null, this.disposables)
     events.on('BufEnter', this.onBufEnter, this, this.disposables)
@@ -487,12 +488,9 @@ export class Workspace implements IWorkspace {
         let changedUris = this.getChangedUris(documentChanges)
         changeCount = changedUris.length
         if (promptUser) {
-          let diskCount = 0
-          for (let uri of changedUris) {
-            if (!this.getDocument(uri)) {
-              diskCount = diskCount + 1
-            }
-          }
+          let diskCount = changedUris.reduce((p, c) => {
+            return p + (this.getDocument(c) == null ? 1 : 0)
+          }, 0)
           if (diskCount) {
             let res = await window.showPrompt(`${diskCount} documents on disk would be loaded for change, confirm?`)
             if (!res) return
@@ -723,29 +721,6 @@ export class Workspace implements IWorkspace {
     let fsPath = URI.parse(uri).fsPath
     if (!fs.existsSync(fsPath)) return ''
     return await readFileLine(fsPath, line)
-  }
-
-  /**
-   * Get position for matchaddpos from range & uri
-   */
-  public async getHighlightPositions(uri: string, range: Range): Promise<[number, number, number][]> {
-    let res: [number, number, number][] = []
-    if (comparePosition(range.start, range.end) == 0) return []
-    let arr: [Range, string][] = []
-    for (let i = range.start.line; i <= range.end.line; i++) {
-      let curr = await this.getLine(uri, range.start.line)
-      if (!curr) continue
-      let sc = i == range.start.line ? range.start.character : 0
-      let ec = i == range.end.line ? range.end.character : curr.length
-      if (sc == ec) continue
-      arr.push([Range.create(i, sc, i, ec), curr])
-    }
-    for (let [r, line] of arr) {
-      let start = byteIndex(line, r.start.character) + 1
-      let end = byteIndex(line, r.end.character) + 1
-      res.push([r.start.line + 1, start, end - start])
-    }
-    return res
   }
 
   /**
@@ -1203,11 +1178,23 @@ export class Workspace implements IWorkspace {
     let id = uuid()
     let { nvim } = this
     this.keymaps.set(id, [fn, false])
+    let buf = this.nvim.createBuffer(this.bufnr)
+    let method = notify ? 'notify' : 'request'
     let modify = getKeymapModifier(mode)
-    nvim.command(`${mode}noremap <silent><nowait><buffer> ${key} :${modify}call coc#rpc#${notify ? 'notify' : 'request'}('doKeymap', ['${id}'])<CR>`, true)
+    // neoivm's bug '<' can't be used.
+    let escaped = key.startsWith('<') && key.endsWith('>') ? `{${key.slice(1, -1)}}` : key
+    if (this.isNvim && !global.hasOwnProperty('__TEST__')) {
+      buf.notify('nvim_buf_set_keymap', [mode, key, `:${modify}call coc#rpc#${method}('doKeymap', ['${id}', '', '${escaped}'])<CR>`, {
+        silent: true,
+        nowait: true
+      }])
+    } else {
+      let cmd = `${mode}noremap <silent><nowait><buffer> ${key} :${modify}call coc#rpc#${method}('doKeymap', ['${id}', '', '${escaped}'])<CR>`
+      nvim.command(cmd, true)
+    }
     return Disposable.create(() => {
       this.keymaps.delete(id)
-      nvim.command(`${mode}unmap <buffer> ${key}`, true)
+      nvim.call('coc#compat#buf_del_keymap', [buf.id, mode, key], true)
     })
   }
 
@@ -1309,14 +1296,12 @@ augroup end`
   // count of document need change
   private getChangedUris(documentChanges: DocumentChange[] | null): string[] {
     let uris: Set<string> = new Set()
-    let newUris: Set<string> = new Set()
+    let createUris: Set<string> = new Set()
     for (let change of documentChanges) {
       if (TextDocumentEdit.is(change)) {
         let { textDocument } = change
         let { uri, version } = textDocument
-        if (!newUris.has(uri)) {
-          uris.add(uri)
-        }
+        uris.add(uri)
         if (version != null && version > 0) {
           let doc = this.getDocument(uri)
           if (!doc) {
@@ -1325,16 +1310,12 @@ augroup end`
           if (doc.version != version) {
             throw new Error(`${uri} changed before apply edit`)
           }
-        } else if (isFile(uri) && !this.getDocument(uri)) {
-          let file = URI.parse(uri).fsPath
-          if (!fs.existsSync(file)) {
-            throw new Error(`file "${file}" not exists`)
-          }
         }
       } else if (CreateFile.is(change) || DeleteFile.is(change)) {
         if (!isFile(change.uri)) {
           throw new Error(`change of scheme ${change.uri} not supported`)
         }
+        createUris.add(change.uri)
         uris.add(change.uri)
       } else if (RenameFile.is(change)) {
         if (!isFile(change.oldUri) || !isFile(change.newUri)) {
@@ -1345,7 +1326,6 @@ augroup end`
           throw new Error(`file "${newFile}" already exists for rename`)
         }
         uris.add(change.oldUri)
-        newUris.add(change.newUri)
       } else {
         throw new Error(`Invalid document change: ${JSON.stringify(change, null, 2)}`)
       }
@@ -1401,6 +1381,7 @@ augroup end`
       })
     }
     if (document.buftype == '' && document.schema == 'file') {
+      this.configurations.checkFolderConfiguration(document.uri)
       let config = this.getConfiguration('workspace')
       let filetypes = config.get<string[]>('ignoredFiletypes', [])
       if (!filetypes.includes(document.filetype)) {
@@ -1412,7 +1393,6 @@ augroup end`
           }
         }
       }
-      this.configurations.checkFolderConfiguration(document.uri)
     }
     if (document.enabled) {
       let textDocument: TextDocument & { bufnr: number } = Object.assign(document.textDocument, { bufnr })

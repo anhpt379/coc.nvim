@@ -446,25 +446,28 @@ export class Variable extends TransformableMarker {
     super()
   }
 
-  public resolve(resolver: VariableResolver): boolean {
-    let value = resolver.resolve(this)
+  public async resolve(resolver: VariableResolver): Promise<boolean> {
+    let value = await resolver.resolve(this)
     if (value && value.includes('\n')) {
-      // get indent of previous Text child
-      let { children } = this.parent
-      let idx = children.indexOf(this)
-      let previous = children[idx - 1]
-      if (previous && previous instanceof Text) {
-        let ms = previous.value.match(/\n([ \t]*)$/)
-        if (ms) {
-          let lines = value.split('\n')
-          let indents = lines.filter(s => s.length > 0).map(s => s.match(/^\s*/)[0])
-          let minIndent = indents.length == 0 ? '' :
-            indents.reduce((p, c) => p.length < c.length ? p : c)
-          let newLines = lines.map((s, i) => i == 0 || s.length == 0 || !s.startsWith(minIndent) ? s :
-            ms[1] + s.slice(minIndent.length))
-          value = newLines.join('\n')
+      // get indent from previous texts
+      let indent = ''
+      this.snippet.walk(m => {
+        if (m == this) {
+          return false
         }
-      }
+        if (m instanceof Text) {
+          let lines = m.toString().split(/\r?\n/)
+          indent = lines[lines.length - 1].match(/^\s*/)[0]
+        }
+        return true
+      })
+      let lines = value.split('\n')
+      let indents = lines.filter(s => s.length > 0).map(s => s.match(/^\s*/)[0])
+      let minIndent = indents.length == 0 ? '' :
+        indents.reduce((p, c) => p.length < c.length ? p : c)
+      let newLines = lines.map((s, i) => i == 0 || s.length == 0 || !s.startsWith(minIndent) ? s :
+        indent + s.slice(minIndent.length))
+      value = newLines.join('\n')
     }
     if (this.transform) {
       value = this.transform.resolve(value || '')
@@ -499,7 +502,7 @@ export class Variable extends TransformableMarker {
 }
 
 export interface VariableResolver {
-  resolve(variable: Variable): string | undefined
+  resolve(variable: Variable): Promise<string | undefined>
 }
 
 function walk(marker: Marker[], visitor: (marker: Marker) => boolean): void {
@@ -667,16 +670,15 @@ export class TextmateSnippet extends Marker {
     return ret
   }
 
-  public resolveVariables(resolver: VariableResolver): this {
+  public async resolveVariables(resolver: VariableResolver): Promise<void> {
+    let items: Variable[] = []
     this.walk(candidate => {
       if (candidate instanceof Variable) {
-        if (candidate.resolve(resolver)) {
-          this._placeholders = undefined
-        }
+        items.push(candidate)
       }
       return true
     })
-    return this
+    await Promise.all(items.map(o => o.resolve(resolver)))
   }
 
   public appendChild(child: Marker): this {
