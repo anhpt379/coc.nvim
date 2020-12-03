@@ -1,6 +1,7 @@
 " Related to float window create
 let s:is_vim = !has('nvim')
 let s:root = expand('<sfile>:h:h:h')
+let s:progresschars = get(g:, 'coc_progress_chars', ['░', '▇'])
 let s:borderchars = get(g:, 'coc_borderchars', ['─', '│', '─', '│', '┌', '┐', '┘', '└'])
 let s:borderjoinchars = get(g:, 'coc_border_joinchars', ['┬', '┤', '┴', '├'])
 let s:prompt_win_width = get(g:, 'coc_prompt_win_width', 32)
@@ -85,9 +86,7 @@ function! coc#float#create_float_win(winid, bufnr, config) abort
         let opts['border'] = a:config['border']
       endif
       call popup_setoptions(a:winid, opts)
-      let related = []
-      call coc#float#vim_buttons(a:winid, a:config, related)
-      call setwinvar(winid, 'related', related)
+      call coc#float#vim_buttons(a:winid, a:config)
       return [a:winid, winbufnr(a:winid)]
     else
       let config = s:convert_config_nvim(a:config)
@@ -131,9 +130,7 @@ function! coc#float#create_float_win(winid, bufnr, config) abort
     if winid == 0
       return []
     endif
-    let related = []
-    call coc#float#vim_buttons(winid, a:config, related)
-    call setwinvar(winid, 'related', related)
+    call coc#float#vim_buttons(winid, a:config)
     if has("patch-8.1.2281")
       call setwinvar(winid, '&showbreak', 'NONE')
     endif
@@ -773,6 +770,10 @@ function! coc#float#close_related(winid, ...) abort
   if !coc#float#valid(a:winid)
     return
   endif
+  let timer = getwinvar(a:winid, 'timer', 0)
+  if timer
+    call timer_stop(timer)
+  endif
   let kind = get(a:, 1, '')
   let winids = getwinvar(a:winid, 'related', [])
   for id in winids
@@ -817,40 +818,7 @@ endfunction
 " Only really useful for visual mode scroll, where coc#float#scroll
 " is not yet implemented
 function! coc#float#nvim_scroll(forward, ...)
-  echohl WarningMsg | echon 'coc#float#nvim_scroll is deprecated, use coc#float#scroll instead' | echohl None
-  let float = coc#float#get_float_win()
-  if !float | return '' | endif
-  let buf = nvim_win_get_buf(float)
-  let buf_height = nvim_buf_line_count(buf)
-  let win_height = nvim_win_get_height(float)
-  if buf_height < win_height | return '' | endif
-  let pos = nvim_win_get_cursor(float)
-  let scrolloff = getwinvar(float, '&scrolloff', 0)
-  let scrolloff = scrolloff*2 < win_height ? scrolloff : 0
-  let amount = (a:forward == 1 ? 1 : -1) * get(a:, 1, max([1, win_height/2]))
-  let last_amount = getwinvar(float, 'coc_float_nvim_scroll_last_amount', 0)
-  if amount > 0
-    if pos[0] == 1
-      let pos[0] += amount + win_height - scrolloff*1 - 1
-    elseif last_amount > 0
-      let pos[0] += amount
-    else
-      let pos[0] += amount + win_height - scrolloff*2 - 1
-    endif
-    let pos[0] = pos[0] < buf_height - scrolloff ? pos[0] : buf_height
-  elseif amount < 0
-    if pos[0] == buf_height
-      let pos[0] += amount - win_height + scrolloff*1 + 1
-    elseif last_amount < 0
-      let pos[0] += amount
-    else
-      let pos[0] += amount - win_height + scrolloff*2 + 1
-    endif
-    let pos[0] = pos[0] > scrolloff ? pos[0] : 1
-  endif
-  call setwinvar(float, 'coc_float_nvim_scroll_last_amount', amount)
-  call nvim_win_set_cursor(float, pos)
-  call timer_start(10, { -> coc#float#nvim_scrollbar(float) })
+  echohl WarningMsg | echon 'coc#float#nvim_scroll is removed, use coc#float#scroll instead' | echohl None
   return ''
 endfunction
 
@@ -965,7 +933,7 @@ function! coc#float#prompt_confirm(title, cb) abort
         \ 'highlight': 'Normal',
         \ 'filter': 'popup_filter_yesno',
         \ 'callback': {id, res -> a:cb(v:null, res)},
-        \ 'borderchars': ['─', '│', '─', '│', '┌', '┐', '┘', '└'],
+        \ 'borderchars': s:borderchars,
         \ 'borderhighlight': ['MoreMsg']
         \ })
     catch /.*/
@@ -1036,10 +1004,11 @@ function! coc#float#prompt_confirm(title, cb) abort
 endfunction
 
 " Create buttons popup on vim
-function! coc#float#vim_buttons(winid, config, related) abort
+function! coc#float#vim_buttons(winid, config) abort
   if !has('patch-8.2.0750')
     return
   endif
+  let related = getwinvar(a:winid, 'related', [])
   let winid = coc#float#get_related(a:winid, 'buttons')
   let btns = get(a:config, 'buttons', [])
   if empty(btns)
@@ -1069,6 +1038,7 @@ function! coc#float#vim_buttons(winid, config, related) abort
     endif
     call popup_setoptions(a:winid, {'padding': padding})
   endif
+  let borderhighlight = get(get(a:config, 'borderhighlight', []), 0, '')
   let pos = popup_getpos(a:winid)
   let bw = empty(border) ? 0 : get(border, 1, 0) + get(border, 3, 0)
   let borderbottom = empty(border) ? 0 : get(border, 2, 0)
@@ -1104,9 +1074,15 @@ function! coc#float#vim_buttons(winid, config, related) abort
     let winid = popup_create(bufnr, options)
   endif
   if winid != 0
+    if !empty(borderhighlight)
+      call coc#highlight#add_highlight(bufnr, -1, borderhighlight, 0, 0, -1)
+      call coc#highlight#add_highlight(bufnr, -1, borderhighlight, 2, 0, -1)
+      call win_execute(winid, 'call matchadd("'.borderhighlight.'", "'.s:borderchars[1].'")')
+    endif
     call setwinvar(winid, 'kind', 'buttons')
     call setwinvar(winid, 'target_winid', a:winid)
-    call add(a:related, winid)
+    call add(related, winid)
+    call setwinvar(a:winid, 'related', related)
     call matchaddpos('MoreMsg', map(keys[0], "[2,v:val]"), 99, -1, {'window': winid})
   endif
 endfunction
@@ -1171,13 +1147,7 @@ function! coc#float#create_dialog(lines, config) abort
   let maxheight = coc#helper#min(get(a:config, 'maxHeight', 78), &lines - &cmdheight - 6)
   let maxwidth = coc#helper#min(get(a:config, 'maxWidth', 78), &columns - 2)
   let close = get(a:config, 'close', 1)
-  let minwidth = 0
-  if !empty(buttons)
-    let minwidth = len(buttons)*3 - 1
-    for txt in buttons
-      let minwidth = minwidth + strdisplaywidth(txt)
-    endfor
-  endif
+  let minwidth = s:min_btns_width(buttons)
   if maxheight <= 0 || maxwidth <= 0 || minwidth > maxwidth
     throw 'Not enough spaces for dialog'
   endif
@@ -1305,28 +1275,30 @@ endfunction
 " - borderhighlight: highlight group string
 " - timeout: timeout in miniseconds
 " - buttons: array of button text for create buttons at bottom.
-
 " - top: default to 1
 " - right: default to 1
 " - maxHeight: default to 10
 " - maxWidth: default to 60
 " - highlight: highlight of window, default to 'CocFloating'
 function! coc#float#create_notification(lines, config) abort
-  let g:c = a:config
   let close = get(a:config, 'close', 1)
   let timeout = get(a:config, 'timeout', 0)
   let borderhighlight = get(a:config, 'borderhighlight', 'CocFloating')
   let highlight = get(a:config, 'highlight', 'CocFloating')
+  let title = get(a:config, 'title', '')
   let top = get(a:config, 'top', 1)
   let right = get(a:config, 'right', 1)
-  let maxHeight = get(a:config, 'maxHeight', 10)
-  let maxWidth = get(a:config, 'maxWidth', 60)
   let buttons = get(a:config, 'buttons', [])
-  let arr = map(copy(a:lines), "strdisplaywidth(v:val)")
-  if &columns < right + 10
+  let maxHeight = get(a:config, 'maxHeight', 10)
+  let maxWidth = min([&columns - right - 10, get(a:config, 'maxWidth', 60)])
+  let progress = get(a:config, 'progress', 0)
+  let minWidth = get(a:config, 'minWidth', 1)
+  let minWidth = max([minWidth, s:min_btns_width(buttons)])
+  if &columns < right + 10 || minWidth > maxWidth
     throw 'no enough spaces for notification'
   endif
-  let width = min([maxWidth, max(arr), &columns - right - 10])
+  let width = min([maxWidth, max(map(a:lines + [title + ' '], "strdisplaywidth(v:val)"))])
+  let width = max([minWidth, width])
   let height = 0
   for line in a:lines
     let w = max([1, strdisplaywidth(line)])
@@ -1344,7 +1316,7 @@ function! coc#float#create_notification(lines, config) abort
         \ 'highlight': highlight,
         \ 'borderhighlight': [borderhighlight],
         \ 'border': [1, 1, 1, 1],
-        \ 'title': get(a:config, 'title', ''),
+        \ 'title': title,
         \ 'close': close,
         \ 'buttons': buttons,
         \ }
@@ -1361,6 +1333,13 @@ function! coc#float#create_notification(lines, config) abort
   endif
   if timeout
     call timer_start(timeout, { -> coc#float#close(winid)})
+  endif
+  if progress
+    let start = reltime()
+    let timer = timer_start(16, { -> s:update_progress(bufnr, width, reltimefloat(reltime(start)))}, {
+      \ 'repeat': -1
+      \ })
+    call setwinvar(winid, 'timer', timer)
   endif
   return res
 endfunction
@@ -1391,6 +1370,7 @@ endfunction
 
 " move winid include relative windows.
 function! s:adjust_win_row(winid, changed) abort
+  let ids = getwinvar(a:winid, 'related', [])
   if s:is_vim
     let pos = popup_getpos(a:winid)
     if pos['line'] - 1 + a:changed + pos['height'] > &lines - &cmdheight
@@ -1400,8 +1380,13 @@ function! s:adjust_win_row(winid, changed) abort
     call popup_move(a:winid, {
       \ 'line': pos['line'] + a:changed
       \ })
+    for winid in ids
+      let winpos = popup_getpos(winid)
+      call popup_move(winid, {
+            \ 'line': winpos['line'] + a:changed
+            \ })
+    endfor
   else
-    let ids = getwinvar(a:winid, 'related', [])
     let ids = [a:winid] + ids
     " close it if it's fully shown
     let borderwin = coc#float#get_related(a:winid, 'border')
@@ -1469,12 +1454,12 @@ function! s:create_btns_buffer(bufnr, width, buttons, borderbottom) abort
     let btnline .= repeat(' ', dl).txt.repeat(' ', dr)
     if idx != n - 1
       call add(idxes, strdisplaywidth(btnline))
-      let btnline .= '│'
+      let btnline .= s:borderchars[1]
     endif
   endfor
-  let lines = [repeat('─', a:width), btnline]
+  let lines = [repeat(s:borderchars[0], a:width), btnline]
   if a:borderbottom
-    call add(lines, repeat('─', a:width))
+    call add(lines, repeat(s:borderchars[0], a:width))
   endif
   for idx in idxes
     let lines[0] = strcharpart(lines[0], 0, idx).s:borderjoinchars[0].strcharpart(lines[0], idx + 1)
@@ -1505,7 +1490,7 @@ function! s:gen_filter_keys(line) abort
         endif
       endif
     else
-      if ch == '│'
+      if ch == s:borderchars[1]
         let next = 1
       endif
     endif
@@ -1691,4 +1676,39 @@ function! s:win_setview(winid, topline, lnum) abort
           \ 'firstline': a:topline,
           \ })
   endif
+endfunction
+
+function! s:min_btns_width(buttons) abort
+  if empty(a:buttons)
+    return 0
+  endif
+  let minwidth = len(a:buttons)*3 - 1
+  for txt in a:buttons
+    let minwidth = minwidth + strdisplaywidth(txt)
+  endfor
+  return minwidth
+endfunction
+
+function! s:update_progress(bufnr, width, ts) abort
+  let duration = 5000
+  " count of blocks
+  let width = float2nr((a:width + 0.0)/4)
+  let percent = (float2nr(a:ts*1000)%duration + 0.0)/duration
+  let line = repeat(s:progresschars[0], a:width)
+  let startIdx = float2nr(round(a:width * percent))
+  let endIdx = startIdx + width
+  let delta = a:width - endIdx
+  if delta > 0
+    let line = s:str_compose(line, startIdx, repeat(s:progresschars[1], width))
+  else
+    let inserted = repeat(s:progresschars[1], width + delta)
+    let line = s:str_compose(line, startIdx, inserted)
+    let line = s:str_compose(line, 0, repeat(s:progresschars[1], - delta))
+  endif
+  call setbufline(a:bufnr, 1, line)
+endfunction
+
+function! s:str_compose(line, idx, text) abort
+  let first = strcharpart(a:line, 0, a:idx)
+  return first.a:text.strcharpart(a:line, a:idx + strwidth(a:text))
 endfunction
