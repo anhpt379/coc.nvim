@@ -46,7 +46,6 @@ class Events {
   }
 
   public async fire(event: string, args: any[]): Promise<void> {
-    logger.debug('Event:', event, args)
     let cbs = this.handlers.get(event)
     if (event == 'InsertEnter') {
       this.insertMode = true
@@ -120,7 +119,7 @@ class Events {
         try {
           Promise.resolve(handler.apply(thisArg || null, args)).then(() => {
             if (timer) clearTimeout(timer)
-            resolve()
+            resolve(undefined)
           }, e => {
             if (timer) clearTimeout(timer)
             reject(e)

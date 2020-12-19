@@ -2,6 +2,8 @@ import { Neovim } from '@chemzqm/neovim'
 import { Disposable, Range } from 'vscode-languageserver-protocol'
 import { disposeAll } from '../../util'
 import window from '../../window'
+import workspace from '../../workspace'
+import events from '../../events'
 import helper from '../helper'
 
 let nvim: Neovim
@@ -10,6 +12,8 @@ let disposables: Disposable[] = []
 beforeAll(async () => {
   await helper.setup()
   nvim = helper.nvim
+  let config = workspace.getConfiguration('coc.preferences')
+  config.update('enableMessageDialog', true)
 })
 
 afterAll(async () => {
@@ -194,5 +198,128 @@ describe('window functions', () => {
     let winid = await nvim.call('win_getid')
     expect(winid).toBe(curr)
     expect(res).toEqual(['foo'])
+  })
+
+  async function ensureNotification(idx: number): Promise<void> {
+    let ids = await nvim.call('coc#float#get_float_win_list')
+    expect(ids.length).toBe(1)
+    let win = nvim.createWindow(ids[0])
+    let kind = await win.getVar('kind')
+    expect(kind).toBe('notification')
+    let bufnr = await nvim.call('winbufnr', [win.id])
+    await events.fire('FloatBtnClick', [bufnr, idx])
+  }
+
+  it('should show information message', async () => {
+    let p = window.showInformationMessage('information message', 'first', 'second')
+    await helper.wait(50)
+    await ensureNotification(0)
+    let res = await p
+    expect(res).toBe('first')
+  })
+
+  it('should show warning message', async () => {
+    let p = window.showWarningMessage('warning message', 'first', 'second')
+    await helper.wait(50)
+    await ensureNotification(1)
+    let res = await p
+    expect(res).toBe('second')
+  })
+
+  it('should show error message', async () => {
+    let p = window.showErrorMessage('error message', 'first', 'second')
+    await helper.wait(50)
+    await ensureNotification(0)
+    let res = await p
+    expect(res).toBe('first')
+  })
+})
+
+describe('window notifications', () => {
+  it('should show notification with options', async () => {
+    let res = await window.showNotification({
+      content: 'my notification',
+      close: true,
+      title: 'title',
+      timeout: 500
+    })
+    expect(res).toBe(true)
+    let ids = await nvim.call('coc#float#get_float_win_list')
+    expect(ids.length).toBe(1)
+    let win = nvim.createWindow(ids[0])
+    let kind = await win.getVar('kind')
+    expect(kind).toBe('notification')
+    let winid = await nvim.call('coc#float#get_related', [win.id, 'border'])
+    let bufnr = await nvim.call('winbufnr', [winid])
+    let buf = nvim.createBuffer(bufnr)
+    let lines = await buf.lines
+    expect(lines[0].includes('title')).toBe(true)
+    await helper.wait(600)
+    let valid = await nvim.call('coc#float#valid', [win.id])
+    expect(valid).toBeFalsy()
+  })
+
+  it('should show progress notification', async () => {
+    let called = 0
+    let res = await window.withProgress({ title: 'Downloading', cancellable: true }, (progress, token) => {
+      let n = 0
+      return new Promise(resolve => {
+        let interval = setInterval(() => {
+          progress.report({ message: 'progress', increment: 1 })
+          n = n + 10
+          called = called + 1
+          if (n == 100) {
+            clearInterval(interval)
+            resolve('done')
+          }
+        }, 100)
+        token.onCancellationRequested(() => {
+          clearInterval(interval)
+          resolve(undefined)
+        })
+      })
+    })
+    expect(called).toBe(10)
+    expect(res).toBe('done')
+  })
+
+  it('should cancel progress notification on window close', async () => {
+    let called = 0
+    let p = window.withProgress({ title: 'Downloading', cancellable: true }, (progress, token) => {
+      let n = 0
+      return new Promise(resolve => {
+        let interval = setInterval(() => {
+          progress.report({ message: 'progress', increment: 1 })
+          n = n + 10
+          called = called + 1
+          if (n == 100) {
+            clearInterval(interval)
+            resolve('done')
+          }
+        }, 100)
+        token.onCancellationRequested(() => {
+          clearInterval(interval)
+          resolve(undefined)
+        })
+      })
+    })
+    await helper.wait(300)
+    await nvim.call('coc#float#close_all', [])
+    let res = await p
+    expect(called).toBeLessThan(10)
+    expect(res).toBe(undefined)
+  })
+
+  it('should cancel progress when window not shown', async () => {
+    let called = 0
+    let p = window.withProgress({ title: 'Process' }, () => {
+      called = called + 1
+      return Promise.resolve()
+    })
+    await p
+    await helper.wait(120)
+    let floats = await helper.getFloats()
+    expect(called).toBe(1)
+    expect(floats.length).toBe(0)
   })
 })

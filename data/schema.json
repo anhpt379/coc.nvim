@@ -410,7 +410,7 @@
     },
     "suggest.triggerCompletionWait": {
       "type": "integer",
-      "default": 50,
+      "default": 100,
       "minimum": 30,
       "maximum": 500,
       "description": "Wait time between text change and completion start, cancel completion when text changed during wait."
@@ -542,11 +542,6 @@
       "description": "Enable diagnostic refresh on insert mode, default false.",
       "default": false
     },
-    "diagnostic.refreshAfterSave": {
-      "type": "boolean",
-      "description": "Only refresh diagnostics after save, default false.",
-      "default": false
-    },
     "diagnostic.displayByAle": {
       "type": "boolean",
       "description": "Use Ale for display diagnostics in vim, will disable coc for display diagnostics, restart required on change.",
@@ -665,15 +660,16 @@
     },
     "signature.triggerSignatureWait": {
       "type": "integer",
-      "default": 50,
-      "minimum": 50,
-      "maximum": 300,
+      "default": 500,
+      "minimum": 200,
+      "maximum": 1000,
       "description": "Timeout for trigger signature help, in miliseconds."
     },
     "signature.target": {
       "type": "string",
       "description": "Target of signature help, use float when possible by default.",
-      "enum": ["float", "echo", "preview"]
+      "default": "float",
+      "enum": ["float", "echo"]
     },
     "signature.maxWindowWidth": {
       "type": "integer",
@@ -693,7 +689,7 @@
     },
     "signature.hideOnTextChange": {
       "type": "boolean",
-      "description": "Hide signature float window when text changed, require restart service on change.",
+      "description": "Hide signature float window when text changed on insert mode.",
       "default": false
     },
     "codeLens.enable": {
@@ -791,7 +787,7 @@
       "default": "CocFloating",
       "description": "Highlight group of notification dialog."
     },
-    "notification,minProgressWidth": {
+    "notification.minProgressWidth": {
       "type": "number",
       "default": 30,
       "description": "Minimum width of progress notification."
@@ -940,6 +936,11 @@
       "type": "string",
       "default": "<C-p>",
       "description": "Key used for jump to previous cursors position."
+    },
+    "coc.preferences.enableMessageDialog": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable messages shown in notification dialog."
     },
     "coc.preferences.maxFileSize": {
       "type": "string",

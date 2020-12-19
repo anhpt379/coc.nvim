@@ -63,9 +63,7 @@ endfunction
 
 " get cursor position
 function! coc#util#cursor()
-  let pos = getcurpos()
-  let content = pos[2] == 1 ? '' : getline('.')[0: pos[2] - 2]
-  return [pos[1] - 1, strchars(content)]
+  return [line('.') - 1, strchars(strpart(getline('.'), 0, col('.') - 1))]
 endfunction
 
 function! coc#util#path_replace_patterns() abort
@@ -129,20 +127,11 @@ function! coc#util#job_command()
     echohl Error | echom '[coc.nvim] "'.node.'" is not executable, checkout https://nodejs.org/en/download/' | echohl None
     return
   endif
-  if filereadable(s:root.'/bin/server.js') && filereadable(s:root.'/src/index.ts') && !get(g:, 'coc_force_bundle', 0)
-    if !filereadable(s:root.'/lib/attach.js')
-      echohl Error | echom '[coc.nvim] javascript bundle not found, please compile typescript code.' | echohl None
-      return
-    endif
-    "use javascript from lib
-    return [node] + get(g:, 'coc_node_args', ['--no-warnings']) + [s:root.'/bin/server.js']
-  else
-    if !filereadable(s:root.'/build/index.js')
-      echohl Error | echom '[coc.nvim] build/index.js not found, reinstall coc.nvim to fix it.' | echohl None
-      return
-    endif
-    return [node] + get(g:, 'coc_node_args', ['--no-warnings']) + [s:root.'/build/index.js']
+  if !filereadable(s:root.'/build/index.js')
+    echohl Error | echom '[coc.nvim] build/index.js not found, please compile the code by webpack' | echohl None
+    return
   endif
+  return [node] + get(g:, 'coc_node_args', ['--no-warnings']) + [s:root.'/build/index.js']
 endfunction
 
 function! coc#util#echo_hover(msg)
@@ -194,7 +183,7 @@ function! coc#util#jumpTo(line, character) abort
   call cursor(a:line + 1, col)
 endfunction
 
-" Position of cursor relative to editor
+" Position of cursor relative to screen cell
 function! coc#util#cursor_pos() abort
   let nr = winnr()
   let [row, col] = win_screenpos(nr)
@@ -595,11 +584,53 @@ function! coc#util#highlight_options()
         \}
 endfunction
 
-" used by vim
-function! coc#util#get_content(bufnr)
-  if !bufloaded(a:bufnr) | return '' | endif
+function! coc#util#set_lines(bufnr, replacement, start, end) abort
+  if !s:is_vim
+    call nvim_buf_set_lines(a:bufnr, a:start, a:end, 0, a:replacement)
+  else
+    call coc#api#notify('buf_set_lines', [a:bufnr, a:start, a:end, 0, a:replacement])
+  endif
   return {
-        \ 'content': join(getbufline(a:bufnr, 1, '$'), "\n"),
+        \ 'lines': getbufline(a:bufnr, 1, '$'),
+        \ 'changedtick': getbufvar(a:bufnr, 'changedtick')
+        \ }
+endfunction
+
+function! coc#util#change_lines(bufnr, list) abort
+  if !bufloaded(a:bufnr) | return v:null | endif
+  undojoin
+  if exists('*setbufline')
+    for [lnum, line] in a:list
+      call setbufline(a:bufnr, lnum + 1, line)
+    endfor
+  elseif a:bufnr == bufnr('%')
+    for [lnum, line] in a:list
+      call setline(lnum + 1, line)
+    endfor
+  else
+    let bufnr = bufnr('%')
+    exe 'noa buffer '.a:bufnr
+    for [lnum, line] in a:list
+      call setline(lnum + 1, line)
+    endfor
+    exe 'noa buffer '.bufnr
+  endif
+  return {
+        \ 'lines': getbufline(a:bufnr, 1, '$'),
+        \ 'changedtick': getbufvar(a:bufnr, 'changedtick')
+        \ }
+endfunction
+
+
+" used by vim
+function! coc#util#get_buf_lines(bufnr, changedtick)
+  if !bufloaded(a:bufnr) | return '' | endif
+  let changedtick = getbufvar(a:bufnr, 'changedtick')
+  if changedtick == a:changedtick
+    return v:null
+  endif
+  return {
+        \ 'lines': getbufline(a:bufnr, 1, '$'),
         \ 'changedtick': getbufvar(a:bufnr, 'changedtick')
         \ }
 endfunction
@@ -841,26 +872,6 @@ endfunction
 function! coc#util#set_buf_var(bufnr, name, val) abort
   if !bufloaded(a:bufnr) | return | endif
   call setbufvar(a:bufnr, a:name, a:val)
-endfunction
-
-function! coc#util#change_lines(bufnr, list) abort
-  if !bufloaded(a:bufnr) | return | endif
-  if exists('*setbufline')
-    for [lnum, line] in a:list
-      call setbufline(a:bufnr, lnum + 1, line)
-    endfor
-  elseif a:bufnr == bufnr('%')
-    for [lnum, line] in a:list
-      call setline(lnum + 1, line)
-    endfor
-  else
-    let bufnr = bufnr('%')
-    exe 'noa buffer '.a:bufnr
-    for [lnum, line] in a:list
-      call setline(lnum + 1, line)
-    endfor
-    exe 'noa buffer '.bufnr
-  endif
 endfunction
 
 function! coc#util#unmap(bufnr, keys) abort

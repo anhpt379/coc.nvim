@@ -68,16 +68,19 @@ export default class FloatFactory implements Disposable {
       this.close()
     }, null, this.disposables)
     events.on('InsertEnter', bufnr => {
-      if (bufnr == this._bufnr) return
+      if (bufnr == this._bufnr || !this.autoHide) return
       this.close()
-    })
+    }, null, this.disposables)
+    events.on('InsertLeave', () => {
+      this.close()
+    }, null, this.disposables)
     events.on('MenuPopupChanged', (ev, cursorline) => {
       let pumAlignTop = this.pumAlignTop = cursorline > ev.row
       if (pumAlignTop == this.alignTop) {
         this.close()
       }
     }, null, this.disposables)
-    this.onCursorMoved = debounce(this._onCursorMoved.bind(this), 200)
+    this.onCursorMoved = debounce(this._onCursorMoved.bind(this), 300)
     events.on('CursorMoved', this.onCursorMoved.bind(this, false), null, this.disposables)
     events.on('CursorMovedI', this.onCursorMoved.bind(this, true), null, this.disposables)
     this.disposables.push(Disposable.create(() => {
@@ -103,6 +106,8 @@ export default class FloatFactory implements Disposable {
   }
 
   /**
+   * Create float window/popup at cursor position.
+   *
    * @deprecated use show method instead
    */
   public async create(docs: Documentation[], _allowSelection = false, offsetX = 0): Promise<void> {
@@ -185,6 +190,11 @@ export default class FloatFactory implements Disposable {
       this.close()
       return
     }
+    let pos = await this.nvim.call('coc#float#cursor_relative', [winid]) as {
+      row: number
+      col: number
+    }
+    if (pos) this.alignTop = pos.row < 0
     this._bufnr = bufnr
     this.tokenSource.dispose()
     this.tokenSource = null

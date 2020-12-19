@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 /* eslint-disable */
 import path from 'path'
-import { ApplyWorkspaceEditParams, ApplyWorkspaceEditRequest, ApplyWorkspaceEditResponse, CancellationToken, ClientCapabilities, CodeAction, CodeActionContext, CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionRegistrationOptions, CodeActionRequest, CodeLens, CodeLensOptions, CodeLensRegistrationOptions, CodeLensRequest, CodeLensResolveRequest, Command, CompletionContext, CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionRegistrationOptions, CompletionRequest, CompletionResolveRequest, createProtocolConnection, DeclarationRequest, Definition, DefinitionOptions, DefinitionRegistrationOptions, DefinitionRequest, Diagnostic, DiagnosticSeverity, DiagnosticTag, DidChangeConfigurationNotification, DidChangeConfigurationParams, DidChangeConfigurationRegistrationOptions, DidChangeTextDocumentNotification, DidChangeTextDocumentParams, DidChangeWatchedFilesNotification, DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentNotification, DidCloseTextDocumentParams, DidOpenTextDocumentNotification, DidOpenTextDocumentParams, DidSaveTextDocumentNotification, DidSaveTextDocumentParams, Disposable, DocumentColorRequest, DocumentFormattingOptions, DocumentFormattingParams, DocumentFormattingRequest, DocumentHighlight, DocumentHighlightOptions, DocumentHighlightRegistrationOptions, DocumentHighlightRequest, DocumentLink, DocumentLinkOptions, DocumentLinkRegistrationOptions, DocumentLinkRequest, DocumentLinkResolveRequest, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams, DocumentOnTypeFormattingRegistrationOptions, DocumentOnTypeFormattingRequest, DocumentRangeFormattingOptions, DocumentRangeFormattingParams, DocumentRangeFormattingRegistrationOptions, DocumentRangeFormattingRequest, DocumentSelector, DocumentSymbol, DocumentSymbolOptions, DocumentSymbolRegistrationOptions, DocumentSymbolRequest, Emitter, ErrorCodes, Event, ExecuteCommandParams, ExecuteCommandRegistrationOptions, ExecuteCommandRequest, ExitNotification, FailureHandlingKind, FileChangeType, FileEvent, FoldingRangeRequest, FormattingOptions, GenericNotificationHandler, GenericRequestHandler, Hover, HoverOptions, HoverRegistrationOptions, HoverRequest, ImplementationRequest, InitializedNotification, InitializeError, InitializeParams, InitializeRequest, InitializeResult, Location, Logger, LogMessageNotification, LogMessageParams, MarkupKind, Message, MessageReader, MessageType, MessageWriter, NotificationHandler, NotificationHandler0, NotificationType, NotificationType0, Position, PrepareRenameRequest, ProgressToken, ProgressType, Proposed, PublishDiagnosticsNotification, PublishDiagnosticsParams, Range, ReferenceOptions, ReferenceRegistrationOptions, ReferencesRequest, RegistrationParams, RegistrationRequest, RenameOptions, RenameParams, RenameRegistrationOptions, RenameRequest, RequestHandler, RequestHandler0, RequestType, RequestType0, ResourceOperationKind, ResponseError, RPCMessageType, SelectionRangeRequest, ServerCapabilities, ShowMessageNotification, ShowMessageParams, ShowMessageRequest, ShutdownRequest, SignatureHelp, SignatureHelpOptions, SignatureHelpRegistrationOptions, SignatureHelpRequest, StaticRegistrationOptions, SymbolInformation, SymbolKind, SymbolTag, TelemetryEventNotification, TextDocument, TextDocumentChangeRegistrationOptions, TextDocumentEdit, TextDocumentPositionParams, TextDocumentRegistrationOptions, TextDocumentSaveRegistrationOptions, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Trace, TraceFormat, TraceOptions, Tracer, TypeDefinitionRequest, UnregistrationParams, UnregistrationRequest, WatchKind, WillSaveTextDocumentNotification, WillSaveTextDocumentParams, WillSaveTextDocumentWaitUntilRequest, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolRegistrationOptions, WorkspaceSymbolRequest } from 'vscode-languageserver-protocol'
+import { ApplyWorkspaceEditParams, CompletionItemTag, ApplyWorkspaceEditRequest, ApplyWorkspaceEditResponse, CancellationToken, ClientCapabilities, CodeAction, CodeActionContext, CodeActionKind, CodeActionOptions, CodeActionParams, CodeActionRegistrationOptions, CodeActionRequest, CodeLens, CodeLensOptions, CodeLensRegistrationOptions, CodeLensRequest, CodeLensResolveRequest, Command, CompletionContext, CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionRegistrationOptions, CompletionRequest, CompletionResolveRequest, createProtocolConnection, DeclarationRequest, Definition, DefinitionOptions, DefinitionRegistrationOptions, DefinitionRequest, Diagnostic, DiagnosticSeverity, DiagnosticTag, DidChangeConfigurationNotification, DidChangeConfigurationParams, DidChangeConfigurationRegistrationOptions, DidChangeTextDocumentNotification, DidChangeTextDocumentParams, DidChangeWatchedFilesNotification, DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentNotification, DidCloseTextDocumentParams, DidOpenTextDocumentNotification, DidOpenTextDocumentParams, DidSaveTextDocumentNotification, DidSaveTextDocumentParams, Disposable, DocumentColorRequest, DocumentFormattingOptions, DocumentFormattingParams, DocumentFormattingRequest, DocumentHighlight, DocumentHighlightOptions, DocumentHighlightRegistrationOptions, DocumentHighlightRequest, DocumentLink, DocumentLinkOptions, DocumentLinkRegistrationOptions, DocumentLinkRequest, DocumentLinkResolveRequest, DocumentOnTypeFormattingOptions, DocumentOnTypeFormattingParams, DocumentOnTypeFormattingRegistrationOptions, DocumentOnTypeFormattingRequest, DocumentRangeFormattingOptions, DocumentRangeFormattingParams, DocumentRangeFormattingRegistrationOptions, DocumentRangeFormattingRequest, DocumentSelector, DocumentSymbol, DocumentSymbolOptions, DocumentSymbolRegistrationOptions, DocumentSymbolRequest, Emitter, ErrorCodes, Event, ExecuteCommandParams, ExecuteCommandRegistrationOptions, ExecuteCommandRequest, ExitNotification, FailureHandlingKind, FileChangeType, FileEvent, FoldingRangeRequest, FormattingOptions, GenericNotificationHandler, GenericRequestHandler, Hover, HoverOptions, HoverRegistrationOptions, HoverRequest, ImplementationRequest, InitializedNotification, InitializeError, InitializeParams, InitializeRequest, InitializeResult, Location, Logger, LogMessageNotification, LogMessageParams, MarkupKind, Message, MessageReader, MessageType, MessageWriter, NotificationHandler, NotificationHandler0, NotificationType, NotificationType0, Position, PrepareRenameRequest, ProgressToken, ProgressType, Proposed, PublishDiagnosticsNotification, PublishDiagnosticsParams, Range, ReferenceOptions, ReferenceRegistrationOptions, ReferencesRequest, RegistrationParams, RegistrationRequest, RenameOptions, RenameParams, RenameRegistrationOptions, RenameRequest, RequestHandler, RequestHandler0, RequestType, RequestType0, ResourceOperationKind, ResponseError, RPCMessageType, SelectionRangeRequest, ServerCapabilities, ShowMessageNotification, ShowMessageParams, ShowMessageRequest, ShutdownRequest, SignatureHelp, SignatureHelpOptions, SignatureHelpRegistrationOptions, SignatureHelpRequest, StaticRegistrationOptions, SymbolInformation, SymbolKind, SymbolTag, TelemetryEventNotification, TextDocument, TextDocumentChangeRegistrationOptions, TextDocumentEdit, TextDocumentPositionParams, TextDocumentRegistrationOptions, TextDocumentSaveRegistrationOptions, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Trace, TraceFormat, TraceOptions, Tracer, TypeDefinitionRequest, UnregistrationParams, UnregistrationRequest, WatchKind, WillSaveTextDocumentNotification, WillSaveTextDocumentParams, WillSaveTextDocumentWaitUntilRequest, WorkDoneProgressOptions, WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolRegistrationOptions, WorkspaceSymbolRequest, SignatureHelpContext, WorkDoneProgressBegin, WorkDoneProgressEnd, WorkDoneProgressReport, WorkDoneProgress, DefinitionLink } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
 import commands from '../commands'
 import languages from '../languages'
 import FileWatcher from '../model/fileSystemWatcher'
 import { CodeActionProvider, CodeLensProvider, CompletionItemProvider, DeclarationProvider, DefinitionProvider, DocumentColorProvider, DocumentFormattingEditProvider, DocumentHighlightProvider, DocumentLinkProvider, DocumentRangeFormattingEditProvider, DocumentSymbolProvider, FoldingRangeProvider, HoverProvider, ImplementationProvider, OnTypeFormattingEditProvider, ProviderResult, ReferenceProvider, RenameProvider, SelectionRangeProvider, SignatureHelpProvider, TypeDefinitionProvider, WorkspaceSymbolProvider } from '../provider'
-import { DiagnosticCollection, OutputChannel, TextDocumentWillSaveEvent, Thenable } from '../types'
+import { DiagnosticCollection, MessageItem, OutputChannel, TextDocumentWillSaveEvent, Thenable } from '../types'
 import { resolveRoot } from '../util/fs'
 import * as Is from '../util/is'
 import { omit } from '../util/lodash'
@@ -21,7 +21,7 @@ import { ConfigurationWorkspaceMiddleware } from './configuration'
 import { DeclarationMiddleware } from './declaration'
 import { FoldingRangeProviderMiddleware } from './foldingRange'
 import { ImplementationMiddleware } from './implementation'
-import progressManager from './progressPart'
+import { ProgressPart } from './progressPart'
 import { SelectionRangeProviderMiddleware } from './selectionRange'
 import { TypeDefinitionMiddleware } from './typeDefinition'
 import { Delayer } from './utils/async'
@@ -343,6 +343,10 @@ export enum RevealOutputChannelOn {
   Never = 4
 }
 
+export interface HandleWorkDoneProgressSignature {
+  (this: void, token: ProgressToken, params: WorkDoneProgressBegin | WorkDoneProgressReport | WorkDoneProgressEnd): void
+}
+
 export interface HandleDiagnosticsSignature {
   (this: void, uri: string, diagnostics: Diagnostic[]): void
 }
@@ -375,6 +379,7 @@ export interface ProvideSignatureHelpSignature {
     this: void,
     document: TextDocument,
     position: Position,
+    context: SignatureHelpContext,
     token: CancellationToken
   ): ProviderResult<SignatureHelp>
 }
@@ -385,7 +390,7 @@ export interface ProvideDefinitionSignature {
     document: TextDocument,
     position: Position,
     token: CancellationToken
-  ): ProviderResult<Definition>
+  ): ProviderResult<Definition | DefinitionLink[]>
 }
 
 export interface ProvideReferencesSignature {
@@ -423,6 +428,10 @@ export interface ProvideCodeActionsSignature {
     context: CodeActionContext,
     token: CancellationToken
   ): ProviderResult<(Command | CodeAction)[]>
+}
+
+export interface ResolveCodeActionSignature {
+  (this: void, item: CodeAction, token: CancellationToken): ProviderResult<CodeAction>
 }
 
 export interface ProvideCodeLensesSignature {
@@ -558,6 +567,7 @@ export interface _Middleware {
     this: void,
     document: TextDocument,
     position: Position,
+    context: SignatureHelpContext,
     token: CancellationToken,
     next: ProvideSignatureHelpSignature
   ) => ProviderResult<SignatureHelp>
@@ -567,7 +577,7 @@ export interface _Middleware {
     position: Position,
     token: CancellationToken,
     next: ProvideDefinitionSignature
-  ) => ProviderResult<Definition>
+  ) => ProviderResult<Definition | DefinitionLink[]>
   provideReferences?: (
     this: void,
     document: TextDocument,
@@ -603,6 +613,17 @@ export interface _Middleware {
     token: CancellationToken,
     next: ProvideCodeActionsSignature
   ) => ProviderResult<(Command | CodeAction)[]>
+  handleWorkDoneProgress?: (
+    this: void,
+    token: ProgressToken,
+    params: WorkDoneProgressBegin | WorkDoneProgressReport | WorkDoneProgressEnd, next: HandleWorkDoneProgressSignature
+  ) => void
+  resolveCodeAction?: (
+    this: void,
+    item: CodeAction,
+    token: CancellationToken,
+    next: ResolveCodeActionSignature
+  ) => ProviderResult<CodeAction>
   provideCodeLenses?: (
     this: void,
     document: TextDocument,
@@ -861,6 +882,12 @@ export interface StaticFeature {
     capabilities: ServerCapabilities,
     documentSelector: DocumentSelector | undefined
   ): void
+
+  /**
+   * Called when the client is stopped to dispose this feature. Usually a feature
+   * unregisters listeners registerd hooked up with the VS Code extension host.
+   */
+  dispose(): void
 }
 
 export interface DynamicFeature<T> {
@@ -1406,7 +1433,7 @@ class WillSaveWaitUntilFeature implements DynamicFeature<TextDocumentRegistratio
       return
     }
     if (!this._listener) {
-      this._listener = workspace.onWillSaveUntil(this.callback, this, this._client.id)
+      this._listener = workspace.onWillSaveTextDocument(this.callback, this)
     }
     this._selectors.set(data.id, data.registerOptions.documentSelector)
   }
@@ -1743,7 +1770,7 @@ export abstract class TextDocumentFeature<
   public getProvider(textDocument: TextDocument): PR {
     for (const registration of this._registrations.values()) {
       let selector = registration.data.registerOptions.documentSelector
-      if (selector !== null && workspace.match(selector, textDocument)) {
+      if (selector !== null && workspace.match(selector, textDocument) > 0) {
         return registration.provider
       }
     }
@@ -1819,7 +1846,7 @@ class CompletionItemFeature extends TextDocumentFeature<CompletionOptions, Compl
       documentationFormat: this._client.supporedMarkupKind,
       deprecatedSupport: true,
       preselectSupport: true,
-      // tagSupport: { valueSet: [CompletionItemTag.Deprecated] },
+      tagSupport: { valueSet: [CompletionItemTag.Deprecated] },
     }
     completion.completionItemKind = { valueSet: SupportedCompletionItemKinds }
   }
@@ -1966,13 +1993,14 @@ class SignatureHelpFeature extends TextDocumentFeature<
   public fillClientCapabilities(capabilites: ClientCapabilities): void {
     let config = ensure(ensure(capabilites, 'textDocument')!, 'signatureHelp')!
     config.dynamicRegistration = true
-    // config.contextSupport = true // TODO context and meta support
+    config.contextSupport = true
     config.signatureInformation = {
       documentationFormat: this._client.supporedMarkupKind,
+      activeParameterSupport: true,
       parameterInformation: {
         labelOffsetSupport: true
       }
-    }
+    } as any
   }
 
   public initialize(
@@ -1993,12 +2021,12 @@ class SignatureHelpFeature extends TextDocumentFeature<
     options: SignatureHelpRegistrationOptions
   ): [Disposable, SignatureHelpProvider] {
     const provider: SignatureHelpProvider = {
-      provideSignatureHelp: (document, position, token) => {
+      provideSignatureHelp: (document, position, token, context) => {
         const client = this._client
-        const providerSignatureHelp: ProvideSignatureHelpSignature = (document, position, token) => {
+        const providerSignatureHelp: ProvideSignatureHelpSignature = (document, position, context, token) => {
           return client.sendRequest(
             SignatureHelpRequest.type,
-            cv.asTextDocumentPositionParams(document, position),
+            cv.asSignatureHelpParams(document, position, context),
             token
           ).then(res => res, error => {
             client.logFailedRequest(SignatureHelpRequest.type, error)
@@ -2009,8 +2037,8 @@ class SignatureHelpFeature extends TextDocumentFeature<
 
         const middleware = client.clientOptions.middleware!
         return middleware.provideSignatureHelp
-          ? middleware.provideSignatureHelp(document, position, token, providerSignatureHelp)
-          : providerSignatureHelp(document, position, token)
+          ? middleware.provideSignatureHelp(document, position, context, token, providerSignatureHelp)
+          : providerSignatureHelp(document, position, context, token)
       }
     }
 
@@ -2260,8 +2288,6 @@ class DocumentSymbolFeature extends TextDocumentFeature<
 
 class WorkspaceSymbolFeature extends WorkspaceFeature<WorkspaceSymbolRegistrationOptions, WorkspaceSymbolProvider
   > {
-  private documentSelector: DocumentSelector
-
   constructor(client: BaseLanguageClient) {
     super(client, WorkspaceSymbolRequest.type)
   }
@@ -2282,9 +2308,7 @@ class WorkspaceSymbolFeature extends WorkspaceFeature<WorkspaceSymbolRegistratio
 
   public initialize(
     capabilities: ServerCapabilities,
-    documentSelector: DocumentSelector | undefined
   ): void {
-    this.documentSelector = documentSelector
     if (!capabilities.workspaceSymbolProvider) {
       return
     }
@@ -3270,11 +3294,19 @@ export abstract class BaseLanguageClient {
     }
   }
 
-  public onProgress<P>(type: ProgressType<P>, token: string | number, handler: NotificationHandler<P>): Disposable {
+  public onProgress<P>(type: ProgressType<any>, token: string | number, handler: NotificationHandler<P>): Disposable {
     if (!this.isConnectionActive()) {
       throw new Error('Language client is not ready yet')
     }
     try {
+      if (type == WorkDoneProgress.type) {
+        const handleWorkDoneProgress = this._clientOptions.middleware!.handleWorkDoneProgress
+        if (handleWorkDoneProgress !== undefined) {
+          return this._resolvedConnection!.onProgress(type, token, (params) => {
+            handleWorkDoneProgress(token, params as any, () => handler(params as unknown as P))
+          })
+        }
+      }
       return this._resolvedConnection!.onProgress(type, token, handler)
     } catch (error) {
       this.error(`Registering progress handler for token ${token} failed.`, error)
@@ -3447,46 +3479,61 @@ export abstract class BaseLanguageClient {
     this.resolveConnection()
       .then(connection => {
         connection.onLogMessage(message => {
+          let kind: string
           switch (message.type) {
             case MessageType.Error:
+              kind = 'error'
               this.error(message.message)
               break
             case MessageType.Warning:
+              kind = 'warning'
               this.warn(message.message)
               break
             case MessageType.Info:
+              kind = 'info'
               this.info(message.message)
               break
             default:
+              kind = 'log'
               this.outputChannel.appendLine(message.message)
+          }
+          if (global.hasOwnProperty('__TEST__')) {
+            console.log(`[${kind}] ${message.message}`)
+            return
           }
         })
         connection.onShowMessage(message => {
           switch (message.type) {
             case MessageType.Error:
-              window.showMessage(message.message, 'error')
+              window.showErrorMessage(message.message)
               break
             case MessageType.Warning:
-              window.showMessage(message.message, 'warning')
+              window.showWarningMessage(message.message)
               break
             case MessageType.Info:
-              window.showMessage(message.message)
+              window.showInformationMessage(message.message)
               break
             default:
-              window.showMessage(message.message)
+              window.showInformationMessage(message.message)
           }
         })
         connection.onRequest(ShowMessageRequest.type, params => {
-          if (!params.actions || params.actions.length == 0) {
-            let msgType = params.type == MessageType.Error
-              ? 'error' : params.type == MessageType.Warning ? 'warning' : 'more'
-            window.showMessage(params.message, msgType as any)
-            return Promise.resolve(null)
+          let messageFunc: <T extends MessageItem>(message: string, ...items: T[]) => Thenable<T>
+          switch (params.type) {
+            case MessageType.Error:
+              messageFunc = window.showErrorMessage.bind(window)
+              break
+            case MessageType.Warning:
+              messageFunc = window.showWarningMessage.bind(window)
+              break
+            case MessageType.Info:
+              messageFunc = window.showInformationMessage.bind(window)
+              break
+            default:
+              messageFunc = window.showInformationMessage.bind(window)
           }
-          let items = params.actions.map(o => typeof o === 'string' ? o : o.title)
-          return window.showQuickpick(items, params.message).then(idx => {
-            return params.actions[idx]
-          })
+          let actions = params.actions || []
+          return messageFunc(params.message, ...actions)
         })
         connection.onTelemetry(_data => {
           // ignored
@@ -3559,12 +3606,11 @@ export abstract class BaseLanguageClient {
     this.fillInitializeParams(initParams)
     if (progressOnInitialization) {
       const token: ProgressToken = UUID.generateUuid()
-      // same as VSCode
       initParams.workDoneToken = token
-      const part = progressManager.create(connection, token)
-      part.begin({ kind: 'begin', title: `Starting LS ${this.id}` })
+      const part = new ProgressPart(connection, token)
+      part.begin({ title: `initializing ${this.id}`, kind: 'begin' })
       return this.doInitialize(connection, initParams).then((result) => {
-        part.done('finished')
+        part.done()
         return result
       }, (error) => {
         part.cancel()
@@ -3687,6 +3733,13 @@ export abstract class BaseLanguageClient {
         this._connectionPromise = undefined
         this._resolvedConnection = undefined
       })
+    }).catch(e => {
+      logger.error('Error on stop languageserver:', e)
+      this.state = ClientState.Stopped
+      this.cleanUpChannel()
+      this._onStop = undefined
+      this._connectionPromise = undefined
+      this._resolvedConnection = undefined
     }))
   }
 
@@ -3699,11 +3752,15 @@ export abstract class BaseLanguageClient {
       this._providers.forEach(provider => provider.dispose())
       this._providers = undefined
     }
+    for (let feature of this._features.values()) {
+      if (typeof feature.dispose === 'function') {
+        feature.dispose()
+      } else {
+        logger.error(`Feature can't be disposed`, feature)
+      }
+    }
     if (this._syncedDocuments) {
       this._syncedDocuments.clear()
-    }
-    for (let handler of this._dynamicFeatures.values()) {
-      handler.dispose()
     }
     if (channel) {
       this.cleanUpChannel()

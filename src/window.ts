@@ -4,16 +4,15 @@ import os from 'os'
 import path from 'path'
 import { CancellationToken, Disposable, Position } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
-import { NotificationConfig, NotificationPreferences, Progress, ProgressOptions } from './types'
 import channels from './channels'
 import events from './events'
 import Dialog from './model/dialog'
 import Menu from './model/menu'
-import Picker from './model/picker'
 import Notification from './model/notification'
+import Picker from './model/picker'
 import ProgressNotification from './model/progress'
 import StatusLine from './model/status'
-import { DialogConfig, DialogPreferences, MessageItem, MessageLevel, MsgTypes, OpenTerminalOption, OutputChannel, QuickPickItem, ScreenPosition, StatusBarItem, StatusItemOption, TerminalResult } from './types'
+import { DialogConfig, DialogPreferences, MessageItem, MessageLevel, MsgTypes, NotificationConfig, NotificationPreferences, OpenTerminalOption, OutputChannel, Progress, ProgressOptions, QuickPickItem, ScreenPosition, StatusBarItem, StatusItemOption, TerminalResult } from './types'
 import { CONFIG_FILE_NAME, disposeAll } from './util'
 import { Mutex } from './util/mutex'
 import workspace from './workspace'
@@ -21,10 +20,14 @@ const logger = require('./util/logger')('window')
 
 class Window {
   private mutex = new Mutex()
-  private statusLine: StatusLine
+  private statusLine: StatusLine | undefined
 
   public get nvim(): Neovim {
     return workspace.nvim
+  }
+
+  public dispose(): void {
+    this.statusLine?.dispose()
   }
 
   /**
@@ -37,7 +40,7 @@ class Window {
     if (this.mutex.busy || !this.nvim) return
     let { messageLevel } = this
     let method = process.env.VIM_NODE_RPC == '1' ? 'callTimer' : 'call'
-    if (global.hasOwnProperty('__TEST__')) console.log(msg)
+    if (global.hasOwnProperty('__TEST__')) logger.info(msg)
     let hl = 'Error'
     let level = MessageLevel.Error
     switch (messageType) {
@@ -251,7 +254,7 @@ class Window {
    */
   public createStatusBarItem(priority = 0, option: StatusItemOption = {}): StatusBarItem {
     if (!workspace.env) {
-      let fn = () => { }
+      let fn = () => {}
       return { text: '', show: fn, dispose: fn, hide: fn, priority: 0, isProgress: false }
     }
     if (!this.statusLine) {
@@ -311,8 +314,9 @@ class Window {
    * @returns Cursor position.
    */
   public async getCursorPosition(): Promise<Position> {
-    let [line, character] = await this.nvim.call('coc#util#cursor')
-    return Position.create(line, character)
+    // vim can't count utf16
+    let [line, content] = await this.nvim.eval(`[line('.')-1, strpart(getline('.'), 0, col('.') - 1)]`) as [number, string]
+    return Position.create(line, content.length)
   }
 
   /**
@@ -398,8 +402,8 @@ class Window {
    */
   public async showInformationMessage(message: string, ...items: string[]): Promise<string | undefined>
   public async showInformationMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
-  public async showInformationMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
-    if (!this.checkDialog()) return undefined
+  public async showInformationMessage<T extends MessageItem | string>(message: string, ...items: T[]): Promise<T | undefined> {
+    if (!this.enableMessageDialog) return await this.showConfirm(message, items, 'Info') as any
     let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
     let idx = await this.createNotification('CocInfoFloat', message, texts)
     return idx == -1 ? undefined : items[idx]
@@ -415,8 +419,8 @@ class Window {
    */
   public async showWarningMessage(message: string, ...items: string[]): Promise<string | undefined>
   public async showWarningMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
-  public async showWarningMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
-    if (!this.checkDialog()) return undefined
+  public async showWarningMessage<T extends MessageItem | string>(message: string, ...items: T[]): Promise<T | undefined> {
+    if (!this.enableMessageDialog) return await this.showConfirm(message, items, 'Warning') as any
     let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
     let idx = await this.createNotification('CocWarningFloat', message, texts)
     return idx == -1 ? undefined : items[idx]
@@ -432,8 +436,8 @@ class Window {
    */
   public async showErrorMessage(message: string, ...items: string[]): Promise<string | undefined>
   public async showErrorMessage<T extends MessageItem>(message: string, ...items: T[]): Promise<T | undefined>
-  public async showErrorMessage<T>(message: string, ...items: T[]): Promise<T | undefined> {
-    if (!this.checkDialog()) return undefined
+  public async showErrorMessage<T extends MessageItem | string>(message: string, ...items: T[]): Promise<T | undefined> {
+    if (!this.enableMessageDialog) return await this.showConfirm(message, items, 'Error') as any
     let texts = typeof items[0] === 'string' ? items : (items as any[]).map(s => s.title)
     let idx = await this.createNotification('CocErrorFloat', message, texts)
     return idx == -1 ? undefined : items[idx]
@@ -443,6 +447,18 @@ class Window {
     if (!this.checkDialog()) return false
     let notification = new Notification(this.nvim, config)
     return await notification.show(this.notificationPreference)
+  }
+
+  // fallback for vim without dialog
+  private async showConfirm<T extends MessageItem | string>(message: string, items: T[], kind: 'Info' | 'Warning' | 'Error'): Promise<T> {
+    if (!items || items.length == 0) {
+      let msgType: MsgTypes = kind == 'Info' ? 'more' : kind == 'Error' ? 'error' : 'warning'
+      this.showMessage(message, msgType)
+      return undefined
+    }
+    let choices = typeof items[0] === 'string' ? items.slice() : items.map(o => (o as MessageItem).title)
+    let res = await this.nvim.callAsync('coc#util#with_callback', ['confirm', [message, choices.join('\n'), 0, kind]])
+    return items[res - 1]
   }
 
   /**
@@ -526,6 +542,12 @@ class Window {
     if (workspace.env.dialog) return true
     this.showMessage('Dialog requires vim >= 8.2.0750 or neovim >= 0.4.0, please upgrade your vim', 'warning')
     return false
+  }
+
+  private get enableMessageDialog(): boolean {
+    if (!workspace.env.dialog) return false
+    let config = workspace.getConfiguration('coc.preferences')
+    return config.get<boolean>('enableMessageDialog', false)
   }
 
   private get messageLevel(): MessageLevel {

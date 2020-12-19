@@ -7,7 +7,7 @@ import Document from '../../model/document'
 import workspace from '../../workspace'
 import window from '../../window'
 import manager from '../../diagnostic/manager'
-import helper from '../helper'
+import helper, { createTmpFile } from '../helper'
 
 let nvim: Neovim
 function createDiagnostic(msg: string, range?: Range, severity?: DiagnosticSeverity): Diagnostic {
@@ -51,14 +51,20 @@ async function createDocument(): Promise<Document> {
 describe('diagnostic manager', () => {
   it('should refresh on buffer create', async () => {
     let uri = URI.file(path.join(path.dirname(__dirname), 'doc')).toString()
+    let fn = jest.fn()
+    let disposable = manager.onDidRefresh(() => {
+      fn()
+    })
     let collection = manager.create('tmp')
     let diagnostic = createDiagnostic('My Error')
     collection.set(uri, [diagnostic])
     let doc = await helper.createDocument('doc')
     let val = await doc.buffer.getVar('coc_diagnostic_info') as any
+    expect(fn).toBeCalled()
     expect(val).toBeDefined()
     expect(val.error).toBe(1)
     collection.dispose()
+    disposable.dispose()
   })
 
   it('should get all diagnostics', async () => {
@@ -257,5 +263,28 @@ describe('diagnostic manager', () => {
     expect(diagnostics.length).toBeGreaterThanOrEqual(1)
     expect(diagnostics[0].message).toBe('error')
     collection.dispose()
+  })
+
+  it('should send ale diagnostic items', async () => {
+    let config = workspace.getConfiguration('diagnostic')
+    config.update('displayByAle', true)
+    let content = `
+    function! MockAleResults(bufnr, collection, items)
+      let g:collection = a:collection
+      let g:items = a:items
+    endfunction
+    `
+    let file = await createTmpFile(content)
+    await nvim.command(`source ${file}`)
+    await createDocument()
+    let items = await nvim.getVar('items') as any[]
+    expect(Array.isArray(items)).toBe(true)
+    expect(items.length).toBeGreaterThan(0)
+    let collection = manager.getCollectionByName('test')
+    collection.clear()
+    await helper.wait(100)
+    items = await nvim.getVar('items') as any[]
+    expect(items).toEqual([])
+    config.update('displayByAle', false)
   })
 })

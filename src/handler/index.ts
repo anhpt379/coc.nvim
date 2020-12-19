@@ -1,5 +1,5 @@
 import { NeovimClient as Neovim } from '@chemzqm/neovim'
-import { CancellationToken, CancellationTokenSource, CodeActionContext, CodeActionKind, Definition, Disposable, DocumentLink, DocumentSymbol, ExecuteCommandParams, ExecuteCommandRequest, Hover, Location, LocationLink, MarkedString, MarkupContent, MarkupKind, Position, Range, SelectionRange, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { CancellationToken, CancellationTokenSource, CodeActionContext, CodeActionKind, Definition, Disposable, DocumentLink, ExecuteCommandParams, ExecuteCommandRequest, Hover, Location, LocationLink, MarkedString, MarkupContent, Position, Range, SelectionRange, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
 import commandManager from '../commands'
 import diagnosticManager from '../diagnostic/manager'
@@ -10,66 +10,32 @@ import Document from '../model/document'
 import FloatFactory from '../model/floatFactory'
 import { TextDocumentContentProvider } from '../provider'
 import services from '../services'
-import snippetManager from '../snippets/manager'
 import { CodeAction, Documentation, StatusBarItem, TagDefinition } from '../types'
-import { disposeAll, wait } from '../util'
+import { disposeAll } from '../util'
 import { getSymbolKind } from '../util/convert'
 import { equals } from '../util/object'
-import { emptyRange, getChangedFromEdits, positionInRange, rangeInRange } from '../util/position'
-import { byteLength, isWord } from '../util/string'
-import workspace from '../workspace'
+import { emptyRange, positionInRange, rangeInRange } from '../util/position'
 import window from '../window'
+import workspace from '../workspace'
 import CodeLensManager from './codelens'
 import Colors from './colors'
 import DocumentHighlighter from './documentHighlight'
+import { addDocument, addDoucmentSymbol, getPreviousContainer, isDocumentSymbols, isMarkdown, sortDocumentSymbols, sortSymbolInformations, SymbolInfo, synchronizeDocument } from './helper'
 import Refactor from './refactor'
 import Search from './search'
+import Signature from './signature'
+import Format from './format'
 const logger = require('../util/logger')('Handler')
-const pairs: Map<string, string> = new Map([
-  ['<', '>'],
-  ['>', '<'],
-  ['{', '}'],
-  ['[', ']'],
-  ['(', ')'],
-])
-
-interface SymbolInfo {
-  filepath?: string
-  lnum: number
-  col: number
-  text: string
-  kind: string
-  level?: number
-  containerName?: string
-  range: Range
-  selectionRange?: Range
-}
 
 interface CommandItem {
   id: string
   title: string
 }
 
-interface SignaturePart {
-  text: string
-  type: 'Label' | 'MoreMsg' | 'Normal'
-}
-
 interface Preferences {
-  signatureMaxHeight: number
-  signaturePreferAbove: boolean
-  signatureHideOnChange: boolean
-  signatureHelpTarget: string
-  signatureFloatMaxWidth: number
-  triggerSignatureHelp: boolean
-  triggerSignatureWait: number
-  formatOnType: boolean
-  formatOnTypeFiletypes: string[]
-  formatOnInsertLeave: boolean
   hoverTarget: string
   previewAutoClose: boolean
   previewMaxHeight: number
-  bracketEnterImprove: boolean
   floatActions: boolean
   currentFunctionSymbolAutoUpdate: boolean
 }
@@ -79,14 +45,14 @@ export default class Handler {
   private documentHighlighter: DocumentHighlighter
   private colors: Colors
   private hoverFactory: FloatFactory
-  private signatureFactory: FloatFactory
+  private signature: Signature
+  private format: Format
   private refactorMap: Map<number, Refactor> = new Map()
   private documentLines: string[] = []
   private codeLensManager: CodeLensManager
   private disposables: Disposable[] = []
   private labels: { [key: string]: string } = {}
   private selectionRange: SelectionRange = null
-  private signaturePosition: Position
   private requestStatusItem: StatusBarItem
   private requestTokenSource: CancellationTokenSource | undefined
   private requestTimer: NodeJS.Timer
@@ -100,27 +66,8 @@ export default class Handler {
       this.getPreferences()
     })
     this.hoverFactory = new FloatFactory(nvim)
-    this.disposables.push(this.hoverFactory)
-    this.signatureFactory = new FloatFactory(nvim)
-    this.disposables.push(this.signatureFactory)
-    workspace.onWillSaveUntil(event => {
-      let { languageId } = event.document
-      let config = workspace.getConfiguration('coc.preferences', event.document.uri)
-      let filetypes = config.get<string[]>('formatOnSaveFiletypes', [])
-      if (filetypes.includes(languageId) || filetypes.some(item => item === '*')) {
-        let willSaveWaitUntil = async (): Promise<TextEdit[]> => {
-          let options = await workspace.getFormatOptions(event.document.uri)
-          let tokenSource = new CancellationTokenSource()
-          let timer = setTimeout(() => {
-            tokenSource.cancel()
-          }, 1000)
-          let textEdits = await languages.provideDocumentFormattingEdits(event.document, options, tokenSource.token)
-          clearTimeout(timer)
-          return textEdits
-        }
-        event.waitUntil(willSaveWaitUntil())
-      }
-    }, null, 'languageserver')
+    this.signature = new Signature(nvim)
+    this.format = new Format(nvim)
     events.on('BufUnload', async bufnr => {
       let refactor = this.refactorMap.get(bufnr)
       if (refactor) {
@@ -133,108 +80,11 @@ export default class Handler {
         this.requestTokenSource.cancel()
       }
     }, null, this.disposables)
-    events.on('CursorMovedI', async (bufnr, cursor) => {
-      if (!this.signaturePosition) return
-      let doc = workspace.getDocument(bufnr)
-      if (!doc) return
-      let { line, character } = this.signaturePosition
-      if (cursor[0] - 1 == line) {
-        let currline = doc.getline(cursor[0] - 1)
-        let col = byteLength(currline.slice(0, character)) + 1
-        if (cursor[1] >= col) return
-      }
-      this.signatureFactory.close()
-    }, null, this.disposables)
-    events.on('InsertLeave', () => {
-      this.signatureFactory.close()
-    }, null, this.disposables)
-    events.on(['TextChangedI', 'TextChangedP'], async () => {
-      if (this.preferences.signatureHideOnChange) {
-        this.signatureFactory.close()
-      }
-    }, null, this.disposables)
-    let lastInsert: number
-    events.on('InsertCharPre', async character => {
-      lastInsert = Date.now()
-      if (character == ')') this.signatureFactory.close()
-    }, null, this.disposables)
-    events.on('Enter', async bufnr => {
-      let { bracketEnterImprove } = this.preferences
-      await this.tryFormatOnType('\n', bufnr)
-      if (bracketEnterImprove) {
-        let line = (await nvim.call('line', '.') as number) - 1
-        let doc = workspace.getDocument(bufnr)
-        if (!doc) return
-        await doc.checkDocument()
-        let pre = doc.getline(line - 1)
-        let curr = doc.getline(line)
-        let prevChar = pre[pre.length - 1]
-        if (prevChar && pairs.has(prevChar)) {
-          let nextChar = curr.trim()[0]
-          if (nextChar && pairs.get(prevChar) == nextChar) {
-            let edits: TextEdit[] = []
-            let opts = await workspace.getFormatOptions(doc.uri)
-            let space = opts.insertSpaces ? ' '.repeat(opts.tabSize) : '\t'
-            let preIndent = pre.match(/^\s*/)[0]
-            let currIndent = curr.match(/^\s*/)[0]
-            let newText = '\n' + preIndent + space
-            let pos: Position = Position.create(line - 1, pre.length)
-            // make sure indent of current line
-            if (preIndent != currIndent) {
-              let newText = doc.filetype == 'vim' ? '  \\ ' + preIndent : preIndent
-              edits.push({ range: Range.create(Position.create(line, 0), Position.create(line, currIndent.length)), newText })
-            } else if (doc.filetype == 'vim') {
-              edits.push({ range: Range.create(line, currIndent.length, line, currIndent.length), newText: '  \\ ' })
-            }
-            if (doc.filetype == 'vim') {
-              newText = newText + '\\ '
-            }
-            edits.push({ range: Range.create(pos, pos), newText })
-            await doc.applyEdits(edits)
-            await window.moveTo(Position.create(line, newText.length - 1))
-          }
-        }
-      }
-    }, null, this.disposables)
-
-    let insertLeaveTs: number
-    let changedTs: number
-    events.on('TextChangedI', async (bufnr, info) => {
-      changedTs = Date.now()
-      let curr = changedTs
-      if (!lastInsert || changedTs - lastInsert > 300) return
-      lastInsert = null
-      let doc = workspace.getDocument(bufnr)
-      if (!doc || doc.isCommandLine || !doc.attached) return
-      let { triggerSignatureHelp, formatOnType } = this.preferences
-      // if (!triggerSignatureHelp && !formatOnType) return
-      let pre = info.pre[info.pre.length - 1]
-      if (!pre) return
-      if (formatOnType && !isWord(pre)) {
-        await this.tryFormatOnType(pre, bufnr)
-      }
-      if (triggerSignatureHelp && languages.shouldTriggerSignatureHelp(doc.textDocument, pre)) {
-        if (changedTs > curr || (insertLeaveTs && insertLeaveTs > curr)) return
-        try {
-          await this.triggerSignatureHelp(doc, { line: info.lnum - 1, character: info.pre.length })
-        } catch (e) {
-          logger.error(`Error on signature help:`, e)
-        }
-      }
-    }, null, this.disposables)
-    events.on('InsertLeave', async bufnr => {
-      insertLeaveTs = Date.now()
-      let { formatOnInsertLeave, formatOnType } = this.preferences
-      if (!formatOnInsertLeave || !formatOnType) return
-      await this.tryFormatOnType('\n', bufnr, true)
-    }, null, this.disposables)
-
     if (this.preferences.currentFunctionSymbolAutoUpdate) {
       events.on('CursorHold', () => {
         this.getCurrentFunctionSymbol().logError()
       }, null, this.disposables)
     }
-
     let provider: TextDocumentContentProvider = {
       onDidChange: null,
       provideTextDocumentContent: async () => {
@@ -591,43 +441,11 @@ export default class Handler {
   }
 
   public async documentFormatting(): Promise<boolean> {
-    let { doc } = await this.getCurrentState()
-    if (doc == null) return false
-    await synchronizeDocument(doc)
-    let options = await workspace.getFormatOptions(doc.uri)
-    let textEdits = await this.withRequestToken('format', token => {
-      return languages.provideDocumentFormattingEdits(doc.textDocument, options, token)
-    })
-    if (textEdits && textEdits.length > 0) {
-      await doc.applyEdits(textEdits)
-      return true
-    }
-    return false
+    return await this.format.documentFormat()
   }
 
   public async documentRangeFormatting(mode: string): Promise<number> {
-    let { doc } = await this.getCurrentState()
-    if (doc == null) return -1
-    await synchronizeDocument(doc)
-    let range: Range
-    if (mode) {
-      range = await workspace.getSelectedRange(mode, doc)
-      if (!range) return -1
-    } else {
-      let [lnum, count, mode] = await this.nvim.eval("[v:lnum,v:count,mode()]") as [number, number, string]
-      // we can't handle
-      if (count == 0 || mode == 'i' || mode == 'R') return -1
-      range = Range.create(lnum - 1, 0, lnum - 1 + count, 0)
-    }
-    let options = await workspace.getFormatOptions(doc.uri)
-    let textEdits = await this.withRequestToken('format', token => {
-      return languages.provideDocumentRangeFormattingEdits(doc.textDocument, range, options, token)
-    })
-    if (textEdits && textEdits.length > 0) {
-      await doc.applyEdits(textEdits)
-      return 0
-    }
-    return -1
+    return await this.format.documentRangeFormat(mode)
   }
 
   public async getTagList(): Promise<TagDefinition[] | null> {
@@ -667,17 +485,10 @@ export default class Handler {
     let diagnostics = diagnosticManager.getDiagnosticsInRange(doc.textDocument, range)
     let context: CodeActionContext = { diagnostics }
     if (only && Array.isArray(only)) context.only = only
-    let codeActionsMap = await this.withRequestToken('code action', token => {
+    let codeActions = await this.withRequestToken('code action', token => {
       return languages.getCodeActions(doc.textDocument, range, context, token)
     })
-    if (!codeActionsMap) return []
-    let codeActions: CodeAction[] = []
-    for (let clientId of codeActionsMap.keys()) {
-      let actions = codeActionsMap.get(clientId)
-      for (let action of actions) {
-        codeActions.push({ clientId, ...action })
-      }
-    }
+    if (!codeActions || codeActions.length == 0) return []
     codeActions.sort((a, b) => {
       if (a.isPreferred && !b.isPreferred) {
         return -1
@@ -746,7 +557,7 @@ export default class Handler {
       if (commandManager.has(command.command)) {
         commandManager.execute(command)
       } else {
-        let clientId = (action as any).clientId
+        let clientId = action.clientId
         let service = services.getService(clientId)
         let params: ExecuteCommandParams = {
           command: command.command,
@@ -808,8 +619,8 @@ export default class Handler {
 
   public async highlight(): Promise<void> {
     let { doc, position, winid } = await this.getCurrentState()
-    if (!doc) return
-    await this.documentHighlighter.highlight(doc.bufnr, winid, position)
+    if (!doc || !doc.attached || doc.isCommandLine) return
+    await this.documentHighlighter.highlight(doc, winid, position)
   }
 
   public async getSymbolsRanges(): Promise<Range[]> {
@@ -919,230 +730,10 @@ export default class Handler {
     if (selectRange) await workspace.selectRange(selectRange)
   }
 
-  private async tryFormatOnType(ch: string, bufnr: number, insertLeave = false): Promise<void> {
-    if (!ch || isWord(ch) || !this.preferences.formatOnType) return
-    if (snippetManager.getSession(bufnr) != null) return
-    let doc = workspace.getDocument(bufnr)
-    if (!doc || !doc.attached) return
-    const filetypes = this.preferences.formatOnTypeFiletypes
-    if (filetypes.length && !filetypes.includes(doc.filetype)) {
-      // Only check formatOnTypeFiletypes when set, avoid breaking change
-      return
-    }
-    if (!languages.hasOnTypeProvider(ch, doc.textDocument)) return
-    let position = await window.getCursorPosition()
-    let origLine = doc.getline(position.line)
-    if (insertLeave && /^\s*$/.test(origLine)) {
-      return
-    }
-    let pos: Position = insertLeave ? { line: position.line, character: origLine.length } : position
-    let { changedtick } = doc
-    await synchronizeDocument(doc)
-    if (doc.changedtick != changedtick) return
-    let tokenSource = new CancellationTokenSource()
-    let disposable = doc.onDocumentChange(() => {
-      clearTimeout(timer)
-      disposable.dispose()
-      tokenSource.cancel()
-    })
-    let timer = setTimeout(() => {
-      disposable.dispose()
-      tokenSource.cancel()
-    }, 2000)
-    let edits: TextEdit[]
-    try {
-      edits = await languages.provideDocumentOnTypeEdits(ch, doc.textDocument, pos, tokenSource.token)
-    } catch (e) {
-      logger.error(`Error on format: ${e.message}`, e.stack)
-    }
-    if (!edits || !edits.length) return
-    if (tokenSource.token.isCancellationRequested) return
-    clearTimeout(timer)
-    disposable.dispose()
-    let changed = getChangedFromEdits(position, edits)
-    await doc.applyEdits(edits)
-    let to = changed ? Position.create(position.line + changed.line, position.character + changed.character) : null
-    if (to) await window.moveTo(to)
-  }
-
-  private async triggerSignatureHelp(doc: Document, position: Position): Promise<boolean> {
-    let { signatureHelpTarget } = this.preferences
-    let part = doc.getline(position.line).slice(0, position.character)
-    if (part.endsWith(')')) {
-      this.signatureFactory.close()
-      return
-    }
-    let signatureHelp = await this.withRequestToken('signature help', async token => {
-      let timer = setTimeout(() => {
-        if (!token.isCancellationRequested && this.requestTokenSource) {
-          this.requestTokenSource.cancel()
-        }
-      }, 2000)
-      await synchronizeDocument(doc)
-      let res = await languages.getSignatureHelp(doc.textDocument, position, token)
-      clearTimeout(timer)
-      return res
-    })
-    if (!signatureHelp || signatureHelp.signatures.length == 0) {
-      this.signatureFactory.close()
-      return false
-    }
-    let { activeParameter, activeSignature, signatures } = signatureHelp
-    if (activeSignature) {
-      // make active first
-      let [active] = signatures.splice(activeSignature, 1)
-      if (active) signatures.unshift(active)
-    }
-    if (signatureHelpTarget == 'echo') {
-      let columns = workspace.env.columns
-      signatures = signatures.slice(0, workspace.env.cmdheight)
-      let signatureList: SignaturePart[][] = []
-      for (let signature of signatures) {
-        let parts: SignaturePart[] = []
-        let { label } = signature
-        label = label.replace(/\n/g, ' ')
-        if (label.length >= columns - 16) {
-          label = label.slice(0, columns - 16) + '...'
-        }
-        let nameIndex = label.indexOf('(')
-        if (nameIndex == -1) {
-          parts = [{ text: label, type: 'Normal' }]
-        } else {
-          parts.push({
-            text: label.slice(0, nameIndex),
-            type: 'Label'
-          })
-          let after = label.slice(nameIndex)
-          if (signatureList.length == 0 && activeParameter != null) {
-            let active = signature.parameters[activeParameter]
-            if (active) {
-              let start: number
-              let end: number
-              if (typeof active.label === 'string') {
-                let str = after.slice(0)
-                let ms = str.match(new RegExp('\\b' + active.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b'))
-                let idx = ms ? ms.index : str.indexOf(active.label)
-                if (idx == -1) {
-                  parts.push({ text: after, type: 'Normal' })
-                } else {
-                  start = idx
-                  end = idx + active.label.length
-                }
-              } else {
-                [start, end] = active.label
-                start = start - nameIndex
-                end = end - nameIndex
-              }
-              if (start != null && end != null) {
-                parts.push({ text: after.slice(0, start), type: 'Normal' })
-                parts.push({ text: after.slice(start, end), type: 'MoreMsg' })
-                parts.push({ text: after.slice(end), type: 'Normal' })
-              }
-            }
-          } else {
-            parts.push({
-              text: after,
-              type: 'Normal'
-            })
-          }
-        }
-        signatureList.push(parts)
-      }
-      this.nvim.callTimer('coc#util#echo_signatures', [signatureList], true)
-    } else {
-      let offset = 0
-      let paramDoc: string | MarkupContent = null
-      let docs: Documentation[] = signatures.reduce((p: Documentation[], c, idx) => {
-        let activeIndexes: [number, number] = null
-        let nameIndex = c.label.indexOf('(')
-        if (idx == 0 && activeParameter != null) {
-          let active = c.parameters[activeParameter]
-          if (active) {
-            let after = c.label.slice(nameIndex == -1 ? 0 : nameIndex)
-            paramDoc = active.documentation
-            if (typeof active.label === 'string') {
-              let str = after.slice(0)
-              let ms = str.match(new RegExp('\\b' + active.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b'))
-              let index = ms ? ms.index : str.indexOf(active.label)
-              if (index != -1) {
-                activeIndexes = [
-                  index + nameIndex,
-                  index + active.label.length + nameIndex
-                ]
-              }
-            } else {
-              activeIndexes = active.label
-            }
-          }
-        }
-        if (activeIndexes == null) {
-          activeIndexes = [nameIndex + 1, nameIndex + 1]
-        }
-        if (offset == 0) {
-          offset = activeIndexes[0] + 1
-        }
-        p.push({
-          content: c.label,
-          filetype: doc.filetype,
-          active: activeIndexes
-        })
-        if (paramDoc) {
-          let content = typeof paramDoc === 'string' ? paramDoc : paramDoc.value
-          if (content.trim().length) {
-            p.push({
-              content,
-              filetype: isMarkdown(c.documentation) ? 'markdown' : 'txt'
-            })
-          }
-        }
-        if (idx == 0 && c.documentation) {
-          let { documentation } = c
-          let content = typeof documentation === 'string' ? documentation : documentation.value
-          if (content.trim().length) {
-            p.push({
-              content,
-              filetype: isMarkdown(c.documentation) ? 'markdown' : 'txt'
-            })
-          }
-        }
-        return p
-      }, [])
-      if (signatureHelpTarget == 'float') {
-        let session = snippetManager.getSession(doc.bufnr)
-        if (session && session.isActive) {
-          let { value } = session.placeholder
-          if (!value.includes('\n')) offset += value.length
-          this.signaturePosition = Position.create(position.line, position.character - value.length)
-        } else {
-          this.signaturePosition = position
-        }
-        let { signaturePreferAbove, signatureFloatMaxWidth, signatureMaxHeight } = this.preferences
-        await this.signatureFactory.show(docs, {
-          maxWidth: signatureFloatMaxWidth,
-          maxHeight: signatureMaxHeight,
-          preferTop: signaturePreferAbove,
-          autoHide: false,
-          offsetX: offset,
-          modes: ['i', 'ic', 's']
-        })
-        // show float
-      } else {
-        this.documentLines = docs.reduce((p, c) => {
-          p.push('``` ' + c.filetype)
-          p.push(...c.content.split(/\r?\n/))
-          p.push('```')
-          return p
-        }, [])
-        this.nvim.command(`noswapfile pedit coc://document`, true)
-      }
-    }
-    return true
-  }
-
   public async showSignatureHelp(): Promise<boolean> {
     let { doc, position } = await this.getCurrentState()
     if (!doc) return false
-    return await this.triggerSignatureHelp(doc, position)
+    return await this.signature.triggerSignatureHelp(doc, position)
   }
 
   public async findLocations(id: string, method: string, params: any, openCommand?: string | false): Promise<void> {
@@ -1366,29 +957,13 @@ export default class Handler {
 
   private getPreferences(): void {
     let config = workspace.getConfiguration('coc.preferences')
-    let signatureConfig = workspace.getConfiguration('signature')
     let hoverTarget = config.get<string>('hoverTarget', 'float')
-    let signatureHelpTarget = signatureConfig.get<string>('target', 'float')
     if (hoverTarget == 'float' && !workspace.floatSupported) {
       hoverTarget = 'preview'
-    }
-    if (signatureHelpTarget == 'float' && !workspace.floatSupported) {
-      signatureHelpTarget = 'echo'
     }
     this.labels = workspace.getConfiguration('suggest').get<any>('completionItemKindLabels', {})
     this.preferences = {
       hoverTarget,
-      signatureHelpTarget,
-      signatureMaxHeight: signatureConfig.get<number>('maxWindowHeight', 8),
-      triggerSignatureHelp: signatureConfig.get<boolean>('enable', true),
-      triggerSignatureWait: Math.max(signatureConfig.get<number>('triggerSignatureWait', 50), 50),
-      signaturePreferAbove: signatureConfig.get<boolean>('preferShownAbove', true),
-      signatureFloatMaxWidth: signatureConfig.get<number>('maxWindowWidth', 80),
-      signatureHideOnChange: signatureConfig.get<boolean>('hideOnTextChange', false),
-      formatOnType: config.get<boolean>('formatOnType', false),
-      formatOnTypeFiletypes: config.get('formatOnTypeFiletypes', []),
-      formatOnInsertLeave: config.get<boolean>('formatOnInsertLeave', false),
-      bracketEnterImprove: config.get<boolean>('bracketEnterImprove', true),
       previewMaxHeight: config.get<number>('previewMaxHeight', 12),
       previewAutoClose: config.get<boolean>('previewAutoClose', false),
       floatActions: config.get<boolean>('floatActions', true),
@@ -1412,96 +987,10 @@ export default class Handler {
   }
 
   public dispose(): void {
+    this.hoverFactory.dispose()
     this.colors.dispose()
+    this.format.dispose()
+    this.documentHighlighter.dispose()
     disposeAll(this.disposables)
-  }
-}
-
-function getPreviousContainer(containerName: string, symbols: SymbolInfo[]): SymbolInfo {
-  if (!symbols.length) return null
-  let i = symbols.length - 1
-  let last = symbols[i]
-  if (last.text == containerName) {
-    return last
-  }
-  while (i >= 0) {
-    let sym = symbols[i]
-    if (sym.text == containerName) {
-      return sym
-    }
-    i--
-  }
-  return null
-}
-
-function sortDocumentSymbols(a: DocumentSymbol, b: DocumentSymbol): number {
-  let ra = a.selectionRange
-  let rb = b.selectionRange
-  if (ra.start.line < rb.start.line) {
-    return -1
-  }
-  if (ra.start.line > rb.start.line) {
-    return 1
-  }
-  return ra.start.character - rb.start.character
-}
-
-function addDoucmentSymbol(res: SymbolInfo[], sym: DocumentSymbol, level: number): void {
-  let { name, selectionRange, kind, children, range } = sym
-  let { start } = selectionRange
-  res.push({
-    col: start.character + 1,
-    lnum: start.line + 1,
-    text: name,
-    level,
-    kind: getSymbolKind(kind),
-    range,
-    selectionRange
-  })
-  if (children && children.length) {
-    children.sort(sortDocumentSymbols)
-    for (let sym of children) {
-      addDoucmentSymbol(res, sym, level + 1)
-    }
-  }
-}
-
-function sortSymbolInformations(a: SymbolInformation, b: SymbolInformation): number {
-  let sa = a.location.range.start
-  let sb = b.location.range.start
-  let d = sa.line - sb.line
-  return d == 0 ? sa.character - sb.character : d
-
-}
-
-function isDocumentSymbol(a: DocumentSymbol | SymbolInformation): a is DocumentSymbol {
-  return a && !a.hasOwnProperty('location')
-}
-
-function isDocumentSymbols(a: DocumentSymbol[] | SymbolInformation[]): a is DocumentSymbol[] {
-  return isDocumentSymbol(a[0])
-}
-
-function isMarkdown(content: MarkupContent | string | undefined): boolean {
-  if (MarkupContent.is(content) && content.kind == MarkupKind.Markdown) {
-    return true
-  }
-  return false
-}
-
-function addDocument(docs: Documentation[], text: string, filetype: string, isPreview = false): void {
-  let content = text.trim()
-  if (!content.length) return
-  if (isPreview && filetype !== 'markdown') {
-    content = '``` ' + filetype + '\n' + content + '\n```'
-  }
-  docs.push({ content, filetype })
-}
-
-async function synchronizeDocument(doc: Document): Promise<void> {
-  let { changedtick } = doc
-  await doc.patchChange()
-  if (changedtick != doc.changedtick) {
-    await wait(50)
   }
 }

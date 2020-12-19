@@ -1,5 +1,5 @@
 import { Neovim } from '@chemzqm/neovim'
-import { CancellationToken, CancellationTokenSource, CodeAction, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, FoldingRange, FormattingOptions, Hover, InsertTextFormat, Location, LocationLink, Position, Range, SelectionRange, SignatureHelp, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { CancellationToken, CancellationTokenSource, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, FoldingRange, FormattingOptions, Hover, InsertTextFormat, Location, LocationLink, Position, Range, SelectionRange, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import commands from './commands'
 import diagnosticManager from './diagnostic/manager'
@@ -31,6 +31,7 @@ import * as complete from './util/complete'
 import { getChangedFromEdits, rangeOverlap } from './util/position'
 import { byteIndex, byteLength, byteSlice } from './util/string'
 import window from './window'
+import { CodeAction } from './types'
 import workspace from './workspace'
 const logger = require('./util/logger')('languages')
 
@@ -48,10 +49,6 @@ interface CompleteConfig {
   detailField: string
   invalidInsertCharacters: string[]
   floatEnable: boolean
-}
-
-function fixDocumentation(str: string): string {
-  return str.replace(/&nbsp;/g, ' ')
 }
 
 class Languages {
@@ -142,6 +139,16 @@ class Languages {
     }
   }
 
+  public hasFormatProvider(doc: TextDocument): boolean {
+    if (this.formatManager.hasProvider(doc)) {
+      return true
+    }
+    if (this.formatRangeManager.hasProvider(doc)) {
+      return true
+    }
+    return false
+  }
+
   public registerOnTypeFormattingEditProvider(
     selector: DocumentSelector,
     provider: OnTypeFormattingEditProvider,
@@ -170,7 +177,7 @@ class Languages {
     }
   }
 
-  public registerCodeActionProvider(selector: DocumentSelector, provider: CodeActionProvider, clientId: string, codeActionKinds?: CodeActionKind[]): Disposable {
+  public registerCodeActionProvider(selector: DocumentSelector, provider: CodeActionProvider, clientId: string | undefined, codeActionKinds?: CodeActionKind[]): Disposable {
     return this.codeActionManager.register(selector, provider, clientId, codeActionKinds)
   }
 
@@ -260,8 +267,8 @@ class Languages {
     return await this.hoverManager.provideHover(document, position, token)
   }
 
-  public async getSignatureHelp(document: TextDocument, position: Position, token: CancellationToken): Promise<SignatureHelp> {
-    return await this.signatureManager.provideSignatureHelp(document, position, token)
+  public async getSignatureHelp(document: TextDocument, position: Position, token: CancellationToken, context: SignatureHelpContext): Promise<SignatureHelp> {
+    return await this.signatureManager.provideSignatureHelp(document, position, token, context)
   }
 
   public async getDefinition(document: TextDocument, position: Position, token: CancellationToken): Promise<Location[]> {
@@ -330,7 +337,7 @@ class Languages {
     return await this.formatRangeManager.provideDocumentRangeFormattingEdits(document, range, options, token)
   }
 
-  public async getCodeActions(document: TextDocument, range: Range, context: CodeActionContext, token: CancellationToken): Promise<Map<string, CodeAction[]>> {
+  public async getCodeActions(document: TextDocument, range: Range, context: CodeActionContext, token: CancellationToken): Promise<CodeAction[]> {
     return await this.codeActionManager.provideCodeActions(document, range, context, token)
   }
 
@@ -538,12 +545,12 @@ class Languages {
             if (typeof documentation == 'string') {
               docs.push({
                 filetype: 'markdown',
-                content: fixDocumentation(documentation)
+                content: documentation
               })
             } else if (documentation.value) {
               docs.push({
                 filetype: documentation.kind == 'markdown' ? 'markdown' : 'txt',
-                content: fixDocumentation(documentation.value)
+                content: documentation.value
               })
             }
           }
@@ -565,7 +572,7 @@ class Languages {
           let isSnippet = await this.applyTextEdit(item, opt)
           let { additionalTextEdits } = item
           if (additionalTextEdits && item.textEdit) {
-            let r = item.textEdit.range
+            let r = (item.textEdit as TextEdit).range
             additionalTextEdits = additionalTextEdits.filter(edit => {
               if (rangeOverlap(r, edit.range)) {
                 logger.error('Filtered overlap additionalTextEdit:', edit)
@@ -603,7 +610,7 @@ class Languages {
     let { line, bufnr, linenr } = option
     let doc = workspace.getDocument(bufnr)
     if (!doc) return false
-    let { range, newText } = textEdit
+    let { range, newText } = textEdit as TextEdit
     let isSnippet = item.insertTextFormat === InsertTextFormat.Snippet
     // replace inserted word
     let start = line.substr(0, range.start.character)
@@ -652,7 +659,7 @@ class Languages {
   private getStartColumn(line: string, items: CompletionItem[]): number | null {
     let first = items[0]
     if (!first.textEdit) return null
-    let { range, newText } = first.textEdit
+    let { range, newText } = first.textEdit as TextEdit
     let { character } = range.start
     if (newText.length < range.end.character - character) {
       return null
@@ -661,7 +668,7 @@ class Languages {
       let o = items[i]
       if (!o) break
       if (!o.textEdit) return null
-      if (o.textEdit.range.start.character !== character) return null
+      if ((o.textEdit as TextEdit).range.start.character !== character) return null
     }
     return byteIndex(line, character)
   }

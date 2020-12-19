@@ -13,14 +13,14 @@ afterAll(async () => {
 })
 
 describe('task test', () => {
-  test('should start task', async () => {
+  it('should start task', async () => {
     let task = workspace.createTask('sleep')
     let started = await task.start({ cmd: 'sleep', args: ['50'] })
     expect(started).toBe(true)
     task.dispose()
   })
 
-  test('should stop task', async () => {
+  it('should stop task', async () => {
     let task = workspace.createTask('sleep')
     await task.start({ cmd: 'sleep', args: ['50'] })
     await helper.wait(10)
@@ -30,7 +30,7 @@ describe('task test', () => {
     task.dispose()
   })
 
-  test('should emit exit event', async () => {
+  it('should emit exit event', async () => {
     let fn = jest.fn()
     let task = workspace.createTask('sleep')
     task.onExit(fn)
@@ -41,7 +41,7 @@ describe('task test', () => {
     expect(fn).toBeCalled()
   })
 
-  test('should emit stdout event', async () => {
+  it('should emit stdout event', async () => {
     let file = await createTmpFile('echo foo')
     let fn = jest.fn()
     let task = workspace.createTask('echo')
@@ -57,16 +57,56 @@ describe('task test', () => {
     expect(fn).toBeCalled()
   })
 
-  test('should emit stderr event', async () => {
-    let file = await createTmpFile('console.error("error")')
+  it('should change environment variables', async () => {
+    let file = await createTmpFile('echo $NODE_ENV\necho $COC_NVIM_TEST\nsleep 1')
+    let task = workspace.createTask('ENV')
+    let lines: string[] = []
+    task.onStdout(arr => {
+      lines.push(...arr)
+    })
+    await task.start({
+      cmd: '/bin/sh',
+      args: [file],
+      env: {
+        NODE_ENV: 'production',
+        COC_NVIM_TEST: 'yes'
+      }
+    })
+    await helper.wait(300)
+    expect(lines).toEqual(['production', 'yes'])
+    let res = await nvim.call('getenv', 'COC_NVIM_TEST')
+    expect(res).toBeNull()
+    task.dispose()
+  })
+
+  it('should receive stdout lines as expected', async () => {
+    let file = await createTmpFile('echo 3\necho ""\necho 4')
+    let task = workspace.createTask('ENV')
+    let lines: string[] = []
+    task.onStdout(arr => {
+      lines.push(...arr)
+    })
+    await task.start({
+      cmd: '/bin/sh',
+      args: [file]
+    })
+    await helper.wait(300)
+    expect(lines).toEqual(['3', '', '4'])
+    task.dispose()
+  })
+
+  it('should emit stderr event', async () => {
+    let file = await createTmpFile('console.error("start\\n\\nend");')
     let fn = jest.fn()
     let task = workspace.createTask('error')
-    task.onStderr(lines => {
-      expect(lines).toEqual(['error'])
+    let lines: string[] = []
+    task.onStderr(arr => {
+      lines.push(...arr)
       fn()
     })
     await task.start({ cmd: 'node', args: [file] })
     await helper.wait(300)
+    expect(lines).toEqual(['start', '', 'end'])
     task.dispose()
     expect(fn).toBeCalled()
   })

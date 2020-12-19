@@ -296,11 +296,13 @@ export default class ListSession {
     this.history.add()
     let { winid } = this.ui
     this.ui.reset()
-    await nvim.call('coc#list#hide', [this.window.id, this.savedHeight, winid])
-    if (workspace.isVim) {
-      nvim.command('redraw', true)
-      // Needed for tabe action, don't know why.
-      await wait(10)
+    if (this.window && winid) {
+      await nvim.call('coc#list#hide', [this.window.id, this.savedHeight, winid])
+      if (workspace.isVim) {
+        nvim.command('redraw', true)
+        // Needed for tabe action, don't know why.
+        await wait(10)
+      }
     }
     nvim.call('coc#prompt#stop_prompt', ['list'], true)
   }
@@ -504,10 +506,11 @@ export default class ListSession {
   private async doItemAction(items: ListItem[], action: ListAction): Promise<void> {
     let { noQuit } = this.listOptions
     let { nvim } = this
-    let persist = this.winid && (action.persist === true || action.name == 'preview' || noQuit)
+    let persistAction = action.persist === true || action.name == 'preview'
+    let persist = this.winid && (persistAction || noQuit)
     try {
       if (persist) {
-        if (action.name != 'preview' && !action.persist) {
+        if (!persistAction) {
           nvim.pauseNotification()
           nvim.call('coc#prompt#stop_prompt', ['list'], true)
           nvim.call('win_gotoid', [this.context.window.id], true)

@@ -20,7 +20,7 @@ import Mru from './model/mru'
 import Resolver from './model/resolver'
 import Task from './model/task'
 import TerminalModel from './model/terminal'
-import WillSaveUntilHandler from './model/willSaveHandler'
+import BufferSync, { SyncItem } from './model/bufferSync'
 import { TextDocumentContentProvider } from './provider'
 import { Autocmd, ConfigurationChangeEvent, ConfigurationTarget, DidChangeTextDocumentParams, DocumentChange, EditerState, Env, IWorkspace, KeymapOption, LanguageServerConfig, MapMode, OutputChannel, PatternType, QuickfixItem, Terminal, TerminalOptions, TextDocumentWillSaveEvent, WorkspaceConfiguration } from './types'
 import { distinct } from './util/array'
@@ -35,7 +35,7 @@ import window from './window'
 
 const APIVERSION = 8
 const logger = require('./util/logger')('workspace')
-let NAME_SPACE = 1080
+let NAME_SPACE = 2000
 const methods = [
   'showMessage',
   'runTerminalCommand',
@@ -62,7 +62,6 @@ export class Workspace implements IWorkspace {
   private resolver: Resolver = new Resolver()
   private rootPatterns: Map<string, string[]> = new Map()
   private _workspaceFolders: WorkspaceFolder[] = []
-  private willSaveUntilHandler: WillSaveUntilHandler
   private _insertMode = false
   private _env: Env
   private _root: string
@@ -110,7 +109,6 @@ export class Workspace implements IWorkspace {
     let json = require('../package.json')
     this.version = json.version
     this.configurations = this.createConfigurations()
-    this.willSaveUntilHandler = new WillSaveUntilHandler(this)
     let cwd = process.cwd()
     if (cwd != os.homedir() && inDirectory(cwd, ['.vim'])) {
       this._workspaceFolders.push({
@@ -747,11 +745,6 @@ export class Workspace implements IWorkspace {
     return lines.join('\n') + '\n'
   }
 
-  // eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-  public onWillSaveUntil(callback: (event: TextDocumentWillSaveEvent) => void, thisArg: any, clientId: string): Disposable {
-    return this.willSaveUntilHandler.addCallback(callback, thisArg, clientId)
-  }
-
   /**
    * Current document.
    */
@@ -1220,6 +1213,28 @@ export class Workspace implements IWorkspace {
     return new Task(this.nvim, id)
   }
 
+  public registerBufferSync<T extends SyncItem>(create: (doc: Document) => T): Disposable {
+    let disposables: Disposable[] = []
+    let bufferSync = new BufferSync(create)
+    disposables.push(bufferSync)
+    for (let doc of this.documents) {
+      bufferSync.create(doc)
+    }
+    this.onDidOpenTextDocument(e => {
+      let doc = this.getDocument(e.bufnr)
+      if (doc) bufferSync.create(doc)
+    }, null, disposables)
+    this.onDidChangeTextDocument(e => {
+      bufferSync.onChange(e)
+    }, null, disposables)
+    this.onDidCloseTextDocument(e => {
+      bufferSync.delete(e.bufnr)
+    }, null, disposables)
+    return Disposable.create(() => {
+      disposeAll(disposables)
+    })
+  }
+
   public setupDynamicAutocmd(initialize = false): void {
     if (!initialize && !this._dynAutocmd) return
     this._dynAutocmd = true
@@ -1448,14 +1463,54 @@ augroup end`
 
   private async onBufWritePre(bufnr: number): Promise<void> {
     let doc = this.buffers.get(bufnr)
-    if (!doc) return
+    if (!doc || !doc.attached) return
+    await doc.checkDocument()
+    let firing = true
+    let thenables: Thenable<TextEdit[] | any>[] = []
     let event: TextDocumentWillSaveEvent = {
       document: doc.textDocument,
-      reason: TextDocumentSaveReason.Manual
+      reason: TextDocumentSaveReason.Manual,
+      waitUntil: (thenable: Thenable<any>) => {
+        if (!firing) {
+          logger.error(`Can't call waitUntil in async manner:`, Error().stack)
+          window.showMessage(`waitUntil can't be used in async manner, check log for details`, 'error')
+        } else {
+          thenables.push(thenable)
+        }
+      }
     }
     this._onWillSaveDocument.fire(event)
-    if (this.willSaveUntilHandler.hasCallback) {
-      await this.willSaveUntilHandler.handeWillSaveUntil(event)
+    firing = false
+    let total = thenables.length
+    if (total) {
+      let promise = new Promise<TextEdit[] | undefined>(resolve => {
+        let timer = setTimeout(() => {
+          window.showMessage('Will save handler timeout after 0.5s', 'warning')
+          resolve(undefined)
+        }, 500)
+        let i = 0
+        let called = false
+        for (let p of thenables) {
+          let cb = (res: any) => {
+            if (called) return
+            called = true
+            clearTimeout(timer)
+            resolve(res)
+          }
+          p.then(res => {
+            if (Array.isArray(res) && res.length && TextEdit.is(res[0])) {
+              return cb(res)
+            }
+            i = i + 1
+            if (i == total) cb(undefined)
+          }, () => {
+            i = i + 1
+            if (i == total) cb(undefined)
+          })
+        }
+      })
+      let edits = await promise
+      if (edits) await doc.applyEdits(edits)
     }
   }
 

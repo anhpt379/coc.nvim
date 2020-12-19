@@ -362,10 +362,6 @@ Built-in configurations:~
 
 	Refresh diagnostics when in insert mode, default: `false`
 
-"diagnostic.refreshAfterSave":~
-
-	Refresh diagnostics after file save only, default: `false`
-
 "diagnostic.displayByAle":~
 
 	Use ALE for displaying diagnostics. This will disable coc.nvim for
@@ -450,7 +446,7 @@ Built-in configurations:~
 
 "signature.triggerSignatureWait":~
 
-	Delay for signature request trigger (milliseconds), default: `50`.
+	Timeout for signature request trigger (milliseconds), default: `500`.
 	Change to higher value for slow Language Servers.
 
 "signature.target":~
@@ -1274,14 +1270,6 @@ g:coc_selectmode_mapping			*g:coc_selectmode_mapping*
 <
 			默认: 1
 
-
-g:coc_force_bundle  				*g:coc_force_bundle*
-
-
-			默认情况下 coc 优先使用 lib 文件夹下的 js 文件。设置为 `1`
-			强制使用 webpack 编译的 `build/index.js` 文件。
-
-			默认: 0
 
 g:coc_node_path 				*g:coc_node_path*
 

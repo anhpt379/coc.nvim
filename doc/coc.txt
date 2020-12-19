@@ -389,10 +389,6 @@ Built-in configurations:~
 
 	Refresh diagnostics when in insert mode, default: `false`
 
-"diagnostic.refreshAfterSave":~
-
-	Refresh diagnostics after file save only, default: `false`
-
 "diagnostic.displayByAle":~
 
 	Use ALE for displaying diagnostics. This will disable coc.nvim for
@@ -477,7 +473,7 @@ Built-in configurations:~
 
 "signature.triggerSignatureWait":~
 
-	Delay for signature request trigger (milliseconds), default: `50`.
+	Timeout for signature request trigger (milliseconds), default: `500`.
 	Change to higher value for slow Language Servers.
 
 "signature.target":~
@@ -690,6 +686,10 @@ Built-in configurations:~
 	default: `true`
 
 							*coc-config-preferences*
+"coc.preferences.enableMessageDialog"~
+
+	Enable messages shown in notification dialog, default: `false`
+
 "coc.preferences.maxFileSize":~
 
 	Maximum file size in bytes that coc.nvim should handle, default: `'10MB'`
@@ -1405,14 +1405,6 @@ g:coc_node_path						*g:coc_node_path*
 	Use this when coc has problems with your system node,
 
 	Note: you can use `~` as home directory.
-
-g:coc_force_bundle					*g:coc_force_bundle*
-
-	When lib folder with javascript code exists, coc.nvim would use
-	compiled javascript from lib folder, set this variable to `1` if you
-	want it use `build/index.js` created by webpack.
-
-	Default: 0
 
 g:coc_node_args						*g:coc_node_args*
 

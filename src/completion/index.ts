@@ -21,6 +21,7 @@ export interface LastInsert {
 
 export class Completion implements Disposable {
   public config: CompleteConfig
+  private triggerTimer: NodeJS.Timer
   private floating: Floating
   private currItem: VimCompleteItem
   // current input string
@@ -39,6 +40,12 @@ export class Completion implements Disposable {
   public init(): void {
     this.config = this.getCompleteConfig()
     this.floating = new Floating(workspace.nvim, workspace.env.isVim)
+    events.on(['InsertCharPre', 'MenuPopupChanged', 'TextChangedI', 'CursorMovedI', 'InsertLeave'], () => {
+      if (this.triggerTimer) {
+        clearTimeout(this.triggerTimer)
+        this.triggerTimer = null
+      }
+    }, this, this.disposables)
     events.on('InsertCharPre', this.onInsertCharPre, this, this.disposables)
     events.on('InsertLeave', this.onInsertLeave, this, this.disposables)
     events.on('InsertEnter', this.onInsertEnter, this, this.disposables)
@@ -123,7 +130,7 @@ export class Completion implements Disposable {
       enablePreview: getConfig<boolean>('enablePreview', false),
       enablePreselect: getConfig<boolean>('enablePreselect', false),
       maxPreviewWidth: getConfig<number>('maxPreviewWidth', 80),
-      triggerCompletionWait: getConfig<number>('triggerCompletionWait', 50),
+      triggerCompletionWait: getConfig<number>('triggerCompletionWait', 100),
       labelMaxLength: getConfig<number>('labelMaxLength', 200),
       triggerAfterInsertEnter: getConfig<boolean>('triggerAfterInsertEnter', false),
       noselect: getConfig<boolean>('noselect', true),
@@ -145,7 +152,7 @@ export class Completion implements Disposable {
     try {
       await this._doComplete(option)
     } catch (e) {
-      this.stop()
+      this.stop(false)
       logger.error('Complete error:', e.stack)
     }
   }
@@ -240,9 +247,6 @@ export class Completion implements Disposable {
       if (s) arr.push(s)
     }
     if (!arr.length) return
-    if (option.triggerCharacter) {
-      await wait(this.config.triggerCompletionWait)
-    }
     await doc.patchChange()
     // document get changed, not complete
     if (doc.changedtick != option.changedtick) return
@@ -292,7 +296,7 @@ export class Completion implements Disposable {
     // not handle when not triggered by character insert
     if (!hasInsert || !pretext) return
     if (sources.shouldTrigger(pretext, document.filetype)) {
-      await this.triggerCompletion(document, pretext, false)
+      await this.triggerCompletion(document, pretext)
     } else {
       await this.resumeCompletion()
     }
@@ -308,20 +312,25 @@ export class Completion implements Disposable {
     // try trigger on character type
     if (!this.activated) {
       if (!latestInsertChar) return
-      await this.triggerCompletion(doc, this.pretext)
+      let triggerSources = sources.getTriggerSources(pretext, doc.filetype)
+      if (triggerSources.length) {
+        await this.triggerCompletion(doc, this.pretext)
+        return
+      }
+      this.triggerTimer = setTimeout(async () => {
+        await this.triggerCompletion(doc, pretext)
+      }, this.config.triggerCompletionWait)
       return
     }
     // Ignore change with other buffer
-    if (!option) return
-    if (bufnr != option.bufnr
-      || option.linenr != info.lnum
-      || option.col >= info.col - 1) {
+    if (!option || bufnr != option.bufnr) return
+    if (option.linenr != info.lnum || option.col >= info.col - 1) {
       this.stop()
       return
     }
     // Completion is canceled by <C-e>
     if (noChange && !latestInsertChar) {
-      this.stop()
+      this.stop(false)
       return
     }
     // Check commit character
@@ -345,22 +354,20 @@ export class Completion implements Disposable {
     }
     // prefer trigger completion
     if (sources.shouldTrigger(pretext, doc.filetype)) {
-      await this.triggerCompletion(doc, pretext, false)
+      await this.triggerCompletion(doc, pretext)
     } else {
       await this.resumeCompletion()
     }
   }
 
-  private async triggerCompletion(doc: Document, pre: string, checkTrigger = true): Promise<void> {
+  private async triggerCompletion(doc: Document, pre: string): Promise<void> {
     if (!doc || !doc.attached) {
       logger.warn('Document not attached, suggest disabled.')
       return
     }
     // check trigger
-    if (checkTrigger) {
-      let shouldTrigger = this.shouldTrigger(doc, pre)
-      if (!shouldTrigger) return
-    }
+    let shouldTrigger = this.shouldTrigger(doc, pre)
+    if (!shouldTrigger) return
     if (doc.getVar('suggest_disable')) {
       logger.warn(`Suggest disabled by b:coc_suggest_disable`)
       return
@@ -387,7 +394,7 @@ export class Completion implements Disposable {
     if (!isActivated || !document || !item.hasOwnProperty('word')) return
     let opt = Object.assign({}, this.option)
     let resolvedItem = this.getCompleteItem(item)
-    this.stop()
+    this.stop(false)
     if (!resolvedItem) return
     let timestamp = this.insertCharTs
     let insertLeaveTs = this.insertLeaveTs
@@ -409,7 +416,7 @@ export class Completion implements Disposable {
 
   private async onInsertLeave(): Promise<void> {
     this.insertLeaveTs = Date.now()
-    this.stop()
+    this.stop(false)
   }
 
   private async onInsertEnter(bufnr: number): Promise<void> {
@@ -511,9 +518,10 @@ export class Completion implements Disposable {
     }
   }
 
-  public stop(): void {
+  public stop(hide = true): void {
     let { nvim } = this
     if (!this.activated) return
+    this.cancelResolve()
     this.currItem = null
     this.activated = false
     if (this.complete) {
@@ -521,6 +529,9 @@ export class Completion implements Disposable {
       this.complete = null
     }
     nvim.pauseNotification()
+    if (hide) {
+      nvim.call('coc#_hide', [], true)
+    }
     this.floating.close()
     if (this.config.numberSelect) {
       nvim.call('coc#_unmap', [], true)
@@ -529,7 +540,7 @@ export class Completion implements Disposable {
       this.nvim.command(`noa set completeopt=${workspace.completeOpt}`, true)
     }
     nvim.command(`let g:coc#_context['candidates'] = []`, true)
-    nvim.call('coc#_hide', [], true)
+    nvim.call('coc#_cancel', [], true)
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     nvim.resumeNotification(false, true)
   }

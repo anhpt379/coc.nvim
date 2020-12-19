@@ -196,9 +196,45 @@ export interface CodeAction extends protocol.CodeAction {
   clientId?: string
 }
 
-export interface DidChangeTextDocumentParams extends protocol.DidChangeTextDocumentParams {
+/**
+ * An event describing a change to a text document.
+ */
+export interface TextDocumentContentChange {
+  /**
+   * The range of the document that changed.
+   */
+  range: Range
+  /**
+   * The new text for the provided range.
+   */
+  text: string
+}
+
+export interface DidChangeTextDocumentParams {
+  /**
+   * The document that did change. The version number points
+   * to the version after all provided content changes have
+   * been applied.
+   */
+  textDocument: {
+    version: number
+    uri: string
+  }
+  /**
+   * The actual content changes. The content changes describe single state changes
+   * to the document. So if there are two content changes c1 (at array index 0) and
+   * c2 (at array index 1) for a document in state S then c1 moves the document from
+   * S to S' and c2 from S' to S''. So c1 is computed on the state S and c2 is computed
+   * on the state S'.
+   */
+  contentChanges: TextDocumentContentChange[]
+  /**
+   * Buffer number of document.
+   */
   bufnr: number
-  // original text
+  /**
+   * Original content before change
+   */
   original: string
 }
 
@@ -207,6 +243,7 @@ export interface TaskOptions {
   args?: string[]
   cwd?: string
   pty?: boolean
+  env?: { [key: string]: string }
   detach?: boolean
 }
 
@@ -472,12 +509,6 @@ export interface CommandConfig {
   title?: string
 }
 
-export interface Fragment {
-  start: number
-  lines: string[]
-  filetype: string
-}
-
 export interface EditerState {
   document: TextDocument
   position: Position
@@ -727,54 +758,6 @@ export interface VimCompleteItem {
   line?: string
 }
 
-export interface PopupProps {
-  col: number
-  length: number // or 0
-  type: string
-  end_lnum?: number
-  end_col?: number
-  id?: number
-  transparent?: boolean
-}
-
-export interface TextItem {
-  text: string
-  props?: PopupProps
-}
-
-export interface PopupOptions {
-  line?: number | string
-  col?: number | string
-  pos?: 'topleft' | 'topright' | 'botleft' | 'botright' | 'center'
-  // move float window when content overlap when it's false(default)
-  fixed?: boolean
-  // no overlap of popupmenu-completion, not implemented
-  flip?: boolean
-  maxheight?: number
-  minheight?: number
-  maxwidth?: number
-  minwidth?: number
-  // When out of range the last buffer line will at the top of the window.
-  firstline?: number
-  // not implemented
-  hidden?: boolean
-  // only -1 and 0 are supported
-  tab?: number
-  title?: string
-  wrap?: boolean
-  drag?: boolean
-  highlight?: string
-  padding?: [number, number, number, number]
-  border?: [number, number, number, number]
-  borderhighlight?: [string, string, string, string]
-  borderchars?: string[]
-  zindex?: number
-  time?: number
-  moved?: string | [number, number]
-  filter?: string
-  callback?: string
-}
-
 export interface PopupChangeEvent {
   completed_item: VimCompleteItem
   height: number
@@ -946,12 +929,6 @@ export enum ConfigurationTarget {
   Global,
   User,
   Workspace
-}
-
-export enum DiagnosticKind {
-  Syntax,
-  Semantic,
-  Suggestion,
 }
 
 export enum ServiceStat {
@@ -1190,13 +1167,13 @@ export interface ISource {
   shortcut?: string
   priority?: number
   sourceType?: SourceType
+  optionalFns?: string[]
   triggerCharacters?: string[]
   // should only be used when trigger match.
   triggerOnly?: boolean
   // regex to detect trigger completetion, ignored when triggerCharacters exists.
   triggerPatterns?: RegExp[]
   disableSyntaxes?: string[]
-  duplicate?: boolean
   isSnippet?: boolean
   filetypes?: string[]
   filepath?: string
@@ -1258,12 +1235,10 @@ export interface ISource {
   shouldCommit?(item: VimCompleteItem, character: string): boolean
 }
 
+export type SourceConfig = Omit<Partial<ISource>, 'shortcut' | 'priority' | 'triggerOnly' | 'triggerCharacters' | 'triggerPatterns' | 'enable' | 'filetypes' | 'disableSyntaxes'>
 // Config property of source
-export interface SourceConfig extends ISource {
-  filepath?: string
-  optionalFns?: string[]
-  shortcut?: string
-}
+// export interface SourceConfig extends ISource {
+// }
 
 /**
  * A diagnostics collection is a container that manages a set of
@@ -1378,7 +1353,7 @@ export interface TextDocumentWillSaveEvent {
    *
    * @param thenable A thenable that resolves to [pre-save-edits](#TextEdit).
    */
-  waitUntil?(thenable: Thenable<TextEdit[] | any>): void
+  waitUntil(thenable: Thenable<TextEdit[] | any>): void
 }
 
 export interface Thenable<T> {
@@ -1551,7 +1526,6 @@ export interface IWorkspace {
   onDidSaveTextDocument: Event<TextDocument>
   onDidChangeConfiguration: Event<ConfigurationChangeEvent>
   onDidWorkspaceInitialized: Event<void>
-  onWillSaveUntil(callback: (event: TextDocumentWillSaveEvent) => void, thisArg: any, clientId: string): Disposable
   findUp(filename: string | string[]): Promise<string | null>
   getDocument(uri: number | string): Document
   getFormatOptions(uri?: string): Promise<FormattingOptions>

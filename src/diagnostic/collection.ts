@@ -20,30 +20,29 @@ export default class Collection implements DiagnosticCollection {
     this.name = owner
   }
 
-  public set(uri: string, diagnostics: Diagnostic[] | null): void
-  public set(entries: [string, Diagnostic[] | null][]): void
-  public set(entries: [string, Diagnostic[] | null][] | string, diagnostics?: Diagnostic[]): void {
-    if (!Array.isArray(entries)) {
-      let uri = entries
-      // if called as set(uri, diagnostics)
-      // -> convert into single-entry entries list
-      entries = [[uri, diagnostics]]
-    }
-
+  public set(uri: string, diagnostics: Diagnostic[] | undefined): void
+  public set(entries: [string, Diagnostic[] | undefined][]): void
+  public set(entries: [string, Diagnostic[] | undefined][] | string, diagnostics?: Diagnostic[]): void {
     let diagnosticsPerFile: Map<string, Diagnostic[]> = new Map()
-    for (let item of entries) {
-      let [file, diagnostics] = item
+    if (!Array.isArray(entries)) {
+      let doc = workspace.getDocument(entries)
+      let uri = doc ? doc.uri : entries
+      diagnosticsPerFile.set(uri, diagnostics || [])
+    } else {
+      for (let item of entries) {
+        let [uri, diagnostics] = item
+        let doc = workspace.getDocument(uri)
+        uri = doc ? doc.uri : uri
+        if (diagnostics == null) {
+          // clear previous diagnostics if entry contains null
+          diagnostics = []
+        } else {
+          diagnostics = (diagnosticsPerFile.get(uri) || []).concat(diagnostics)
+        }
 
-      if (diagnostics == null) {
-        // clear diagnostics if entry contains null
-        diagnostics = []
-      } else {
-        diagnostics = (diagnosticsPerFile.get(file) || []).concat(diagnostics)
+        diagnosticsPerFile.set(uri, diagnostics)
       }
-
-      diagnosticsPerFile.set(file, diagnostics)
     }
-
     for (let item of diagnosticsPerFile) {
       let [uri, diagnostics] = item
       uri = URI.parse(uri).toString()

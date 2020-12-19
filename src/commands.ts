@@ -52,18 +52,15 @@ export class CommandManager implements Disposable {
     }, true)
     this.register({
       id: 'workbench.action.reloadWindow',
-      execute: () => {
-        nvim.command('CocRestart', true)
+      execute: async () => {
+        await nvim.command('edit')
       }
     }, true)
     this.register({
       id: 'editor.action.insertSnippet',
       execute: async (edit: TextEdit) => {
-        let doc = workspace.getDocument(workspace.bufnr)
-        if (!doc) return
         nvim.call('coc#_cancel', [], true)
-        if (doc.dirty) doc.forceSync()
-        await snipetsManager.insertSnippet(edit.newText, true, edit.range)
+        return await snipetsManager.insertSnippet(edit.newText, true, edit.range)
       }
     }, true)
     this.register({
@@ -75,7 +72,7 @@ export class CommandManager implements Disposable {
     this.register({
       id: 'editor.action.triggerSuggest',
       execute: async () => {
-        await wait(100)
+        await wait(60)
         nvim.call('coc#start', [], true)
       }
     }, true)
@@ -129,8 +126,7 @@ export class CommandManager implements Disposable {
     this.register({
       id: 'workspace.clearWatchman',
       execute: async () => {
-        if (global.hasOwnProperty('__TEST__')) return
-        let res = await window.runTerminalCommand('watchmann watch-del-all')
+        let res = await window.runTerminalCommand('watchman watch-del-all')
         if (res.success) window.showMessage('Cleared watchman watching directories.')
       }
     }, false, 'run watch-del-all for watchman to free up memory.')
