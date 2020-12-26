@@ -3,7 +3,7 @@ import { CancellationToken, CancellationTokenSource, CodeActionContext, CodeActi
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import commands from './commands'
 import diagnosticManager from './diagnostic/manager'
-import { CodeActionProvider, CodeLensProvider, CompletionItemProvider, DeclarationProvider, DefinitionProvider, DocumentColorProvider, DocumentFormattingEditProvider, DocumentLinkProvider, DocumentRangeFormattingEditProvider, DocumentSymbolProvider, FoldingContext, FoldingRangeProvider, HoverProvider, ImplementationProvider, OnTypeFormattingEditProvider, ReferenceContext, ReferenceProvider, RenameProvider, SelectionRangeProvider, SignatureHelpProvider, TypeDefinitionProvider, WorkspaceSymbolProvider } from './provider'
+import { CodeActionProvider, CodeLensProvider, CompletionItemProvider, DeclarationProvider, DefinitionProvider, DocumentColorProvider, DocumentFormattingEditProvider, DocumentHighlightProvider, DocumentLinkProvider, DocumentRangeFormattingEditProvider, DocumentSymbolProvider, FoldingContext, FoldingRangeProvider, HoverProvider, ImplementationProvider, OnTypeFormattingEditProvider, ReferenceContext, ReferenceProvider, RenameProvider, SelectionRangeProvider, SignatureHelpProvider, TypeDefinitionProvider, WorkspaceSymbolProvider } from './provider'
 import CodeActionManager from './provider/codeActionmanager'
 import CodeLensManager from './provider/codeLensManager'
 import DeclarationManager from './provider/declarationManager'
@@ -18,7 +18,7 @@ import FormatRangeManager from './provider/formatRangeManager'
 import HoverManager from './provider/hoverManager'
 import ImplementationManager from './provider/implementationManager'
 import OnTypeFormatManager from './provider/onTypeFormatManager'
-import SelectionRangeManager from './provider/rangeManager'
+import SelectionRangeManager from './provider/selectionRangeManager'
 import ReferenceManager from './provider/referenceManager'
 import RenameManager from './provider/renameManager'
 import SignatureManager from './provider/signatureManager'
@@ -204,7 +204,7 @@ class Languages {
     return this.foldingRangeManager.register(selector, provider)
   }
 
-  public registerDocumentHighlightProvider(selector: DocumentSelector, provider: any): Disposable {
+  public registerDocumentHighlightProvider(selector: DocumentSelector, provider: DocumentHighlightProvider): Disposable {
     return this.documentHighlightManager.register(selector, provider)
   }
 
@@ -375,8 +375,8 @@ class Languages {
     return await this.codeLensManager.provideCodeLenses(document, token)
   }
 
-  public async resolveCodeLens(codeLens: CodeLens): Promise<CodeLens> {
-    return await this.codeLensManager.resolveCodeLens(codeLens, this.token)
+  public async resolveCodeLens(codeLens: CodeLens, token: CancellationToken): Promise<CodeLens> {
+    return await this.codeLensManager.resolveCodeLens(codeLens, token)
   }
 
   public async provideDocumentOnTypeEdits(

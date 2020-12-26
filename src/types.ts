@@ -1,6 +1,6 @@
 import { Neovim, Window, Buffer } from '@chemzqm/neovim'
 import log4js from 'log4js'
-import { CancellationToken, CompletionTriggerKind, CreateFile, CreateFileOptions, DeleteFile, DeleteFileOptions, Diagnostic, Disposable, DocumentSelector, Event, FormattingOptions, Location, Position, Range, RenameFile, RenameFileOptions, TextDocumentEdit, TextDocumentSaveReason, TextEdit, WorkspaceEdit, WorkspaceFolder } from 'vscode-languageserver-protocol'
+import { CancellationToken, CompletionTriggerKind, CreateFile, CreateFileOptions, DeleteFile, DeleteFileOptions, Diagnostic, Disposable, DocumentSelector, Event, FormattingOptions, Location, Position, Range, RenameFile, RenameFileOptions, SymbolKind, TextDocumentEdit, TextDocumentSaveReason, TextEdit, WorkspaceEdit, WorkspaceFolder } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { URI } from 'vscode-uri'
 import Configurations from './configuration'
@@ -21,6 +21,53 @@ export type ProviderName = 'rename' | 'onTypeEdit' | 'documentLink' | 'documentC
 
 export interface ParsedUrlQueryInput {
   [key: string]: unknown
+}
+
+export interface BufferSyncItem {
+  /**
+   * Called on buffer unload.
+   */
+  dispose: () => void
+  /**
+   * Called on buffer change.
+   */
+  onChange?(e: DidChangeTextDocumentParams): void
+}
+
+export interface DiagnosticConfig {
+  enableSign: boolean
+  locationlistUpdate: boolean
+  enableHighlightLineNumber: boolean
+  checkCurrentLine: boolean
+  enableMessage: string
+  displayByAle: boolean
+  signPriority: number
+  errorSign: string
+  warningSign: string
+  infoSign: string
+  hintSign: string
+  level: number
+  messageTarget: string
+  messageDelay: number
+  maxWindowHeight: number
+  maxWindowWidth: number
+  refreshOnInsertMode: boolean
+  virtualText: boolean
+  virtualTextCurrentLineOnly: boolean
+  virtualTextSrcId: number
+  virtualTextPrefix: string
+  virtualTextLines: number
+  virtualTextLineSeparator: string
+  filetypeMap: object
+  showUnused?: boolean
+  showDeprecated?: boolean
+  format?: string
+}
+
+export interface DiagnosticEventParams {
+  bufnr: number
+  uri: string
+  diagnostics: ReadonlyArray<Diagnostic>
 }
 
 /**
@@ -1519,8 +1566,8 @@ export interface IWorkspace {
   readonly configurations: Configurations
   textDocuments: TextDocument[]
   workspaceFolder: WorkspaceFolder
-  onDidOpenTextDocument: Event<TextDocument>
-  onDidCloseTextDocument: Event<TextDocument>
+  onDidOpenTextDocument: Event<TextDocument & { bufnr: number }>
+  onDidCloseTextDocument: Event<TextDocument & { bufnr: number }>
   onDidChangeTextDocument: Event<DidChangeTextDocumentParams>
   onWillSaveTextDocument: Event<TextDocumentWillSaveEvent>
   onDidSaveTextDocument: Event<TextDocument>

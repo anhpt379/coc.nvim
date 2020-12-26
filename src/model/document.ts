@@ -7,10 +7,11 @@ import events from '../events'
 import { ChangeInfo, DidChangeTextDocumentParams, Env } from '../types'
 import { diffLines, getChange } from '../util/diff'
 import { disposeAll, getUri, wait } from '../util/index'
+import { Mutex } from '../util/mutex'
 import { equals } from '../util/object'
 import { byteLength, byteSlice } from '../util/string'
 import { Chars } from './chars'
-import { Mutex } from '../util/mutex'
+import { LinesTextDoucment } from './textdocument'
 const logger = require('../util/logger')('model-document')
 
 export type LastChangeType = 'insert' | 'change' | 'delete'
@@ -215,13 +216,12 @@ export default class Document {
 
   private async onChange(buf: Buffer, tick: number, firstline: number, lastline: number, linedata: string[]): Promise<void> {
     if (buf.id !== this.bufnr || !this._attached || tick == null) return
-    let release = await this.mutex.acquire()
+    if (this.mutex.busy) return
     if (tick > this._changedtick) {
       this._changedtick = tick
       this.lines = [...this.lines.slice(0, firstline), ...linedata, ...this.lines.slice(lastline)]
       this.fireContentChanges()
     }
-    release()
   }
 
   /**
@@ -229,11 +229,13 @@ export default class Document {
    */
   public async checkDocument(): Promise<void> {
     let { buffer } = this
+    let release = await this.mutex.acquire()
     this.fireContentChanges.clear()
     this._changedtick = await buffer.changedtick
     this.lines = await buffer.lines
     let changed = this._fireContentChanges()
     if (changed) await wait(30)
+    release()
   }
 
   /**
@@ -285,9 +287,6 @@ export default class Document {
       edits = arguments[1]
     }
     if (edits.length == 0) return
-    edits.forEach(edit => {
-      edit.newText = edit.newText.replace(/\r/g, '')
-    })
     let current = this.getDocumentContent()
     let textDocument = TextDocument.create(this.uri, this.filetype, 1, current)
     // apply edits to current textDocument
@@ -305,7 +304,6 @@ export default class Document {
         // res.lines
         this.fireContentChanges.clear()
         this._fireContentChanges()
-        release()
         // could be user type during applyEdits.
         if (!equals(newLines, res.lines)) {
           process.nextTick(() => {
@@ -314,6 +312,7 @@ export default class Document {
             this._fireContentChanges()
           })
         }
+        release()
       } catch (e) {
         logger.error('Error on applyEdits: ', e)
         release()
@@ -440,7 +439,7 @@ export default class Document {
    */
   public get textDocument(): TextDocument {
     let { version, filetype, uri } = this
-    return TextDocument.create(uri, filetype, version, this.content)
+    return new LinesTextDoucment(uri, filetype, version, this.syncLines, this.eol)
   }
 
   /**
