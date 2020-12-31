@@ -6,11 +6,11 @@ import { emptyObject, objectLiteral } from '../util/is'
 import { equals } from '../util/object'
 import fs from 'fs'
 import { URI } from 'vscode-uri'
-import path from 'path'
+import path, { dirname, resolve } from 'path'
 const logger = require('../util/logger')('configuration-util')
-declare let __webpack_require__: any
-const isWebpack = typeof __webpack_require__ === "function"
-const pluginRoot = isWebpack ? path.dirname(__dirname) : path.resolve(__dirname, '../..')
+declare const ESBUILD
+
+const pluginRoot = typeof ESBUILD === 'undefined' ? resolve(__dirname, '../..') : dirname(__dirname)
 
 export type ShowError = (errors: ErrorItem[]) => void
 

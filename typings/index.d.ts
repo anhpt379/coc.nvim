@@ -2053,7 +2053,7 @@ declare module 'coc.nvim' {
     /**
      * Executes an ex-command by notification.
      */
-    command(arg: string, isNotify: true): Promise<void>
+    command(arg: string, isNotify: true): void
 
     /**
      * Runs a command and returns output.
@@ -3545,9 +3545,11 @@ declare module 'coc.nvim' {
      */
     timeout?: number
     /**
-     * - 'string' for text response content
-     * - 'object' for json response content
-     * - 'buffer' for response not text or json
+     * Always return buffer instead of parsed response.
+     */
+    buffer?: boolean
+    /**
+     * Data send to server.
      */
     data?: string | { [key: string]: any } | Buffer
     /**

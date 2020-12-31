@@ -158,10 +158,6 @@ export class Workspace implements IWorkspace {
     }
     events.on('InsertLeave', forceSync, null, this.disposables)
     events.on('CursorHold', forceSync, null, this.disposables)
-    events.on('BufWinLeave', (_, winid) => {
-      if (winid == -1) return
-      this.nvim.call('coc#highlight#clear_match_group', [winid, '^Coc'], true)
-    }, null, this.disposables)
     events.on('BufEnter', this.onBufEnter, this, this.disposables)
     events.on('CursorMoved', this.checkCurrentBuffer, this, this.disposables)
     events.on('CursorMovedI', this.checkCurrentBuffer, this, this.disposables)
@@ -1532,10 +1528,13 @@ augroup end`
     let u = URI.parse(document.uri)
     let dir = path.dirname(u.fsPath)
     let { cwd } = this
+    let config = this.getConfiguration('workspace')
+    let bottomUpFileTypes = config.get<string[]>('workspaceFolderBottomUpFiletypes', [])
     for (let patternType of types) {
       let patterns = this.getRootPatterns(document, patternType)
       if (patterns && patterns.length) {
-        let root = resolveRoot(dir, patterns, cwd)
+        let isBottomUp = bottomUpFileTypes.includes(document.filetype)
+        let root = resolveRoot(dir, patterns, cwd, isBottomUp)
         if (root) return root
       }
     }
