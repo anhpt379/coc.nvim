@@ -909,7 +909,7 @@
     "list.source.symbols.excludes": {
       "type": "array",
       "default": [],
-      "description": "Patterns of mimimatch for filepath to execlude from symbols list.",
+      "description": "Patterns of minimatch for filepath to execlude from symbols list.",
       "items": {
         "type": "string"
       }
@@ -1028,7 +1028,7 @@
     "coc.preferences.jumpCommand": {
       "type": "string",
       "description": "Command used for location jump, like goto definition, goto references etc.",
-      "enum": ["edit", "split", "vsplit", "tabe", "drop", "tab drop"],
+      "enum": ["edit", "split", "vsplit", "tabe", "drop", "tab drop", "pedit"],
       "default": "edit"
     },
     "coc.preferences.messageLevel": {
