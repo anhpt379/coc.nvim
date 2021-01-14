@@ -592,6 +592,16 @@ Built-in configurations:~
 
 	Note: This is the filetype after mapping by `g:coc_filetype_map`.
 
+"workspace.bottomUpFiletypes":~
+
+	Filetypes that should have workspace folder should resolved from
+	base directory of file.
+
+"workspace.workspaceFolderCheckCwd":~
+
+	Whether the cwd directory should be checked first when resolving
+	workspace folder of current buffer.
+
 							*coc-config-list*
 "list.indicator":~
 
@@ -1512,6 +1522,13 @@ g:coc_prompt_win_width 					*g:coc_prompt_win_width*
 
 	Width of input prompt window on neovim >= 0.5.0.  Prompt buffer can't
 	work with vim8's popup yet.
+
+g:coc_markdown_disabled_languages  			*g:coc_markdown_disabled_languages*
+
+	Filetype list that should be disabled for highlight in markdown block, ex: >
+
+	let g:coc_markdown_disabled_languages = ['html']
+>
 
 g:coc_install_yarn_cmd 					*g:coc_install_yarn_cmd*
 
@@ -2881,6 +2898,7 @@ The mapping expression should be `command:arguments`, available commands:
 	'next'          - move cursor to next item.
 	'defaultaction' - do default action for selected items or current item.
 	'jumpback'      - stop prompt and jump back to original window.
+	'previewtoggle' - toggle preview window, requires preview action exists.
 	'previewup'     - scroll preview window up.
 	'previewdown'   - scroll preview window down.
 	'help'          - show help.
@@ -3206,7 +3224,7 @@ Use configuration like: >
 	\ },
 	\ }
 
-  " Use auocmd to force lightline update.
+  " Use autocmd to force lightline update.
   autocmd User CocStatusChange,CocDiagnosticChange call lightline#update()
 <
 ==============================================================================
