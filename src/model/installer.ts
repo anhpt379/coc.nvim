@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { spawn } from 'child_process'
+import { parse, ParseError } from 'jsonc-parser'
 import readline from 'readline'
 import fs from 'fs-extra'
 import os from 'os'
@@ -40,14 +41,31 @@ export class Installer extends EventEmitter {
     if (/^https?:/.test(def)) {
       this.url = def
     } else {
-      if (def.includes('@')) {
-        let [name, version] = def.split('@', 2)
-        this.name = name
-        this.version = version
+      if (def.startsWith('@')) {
+        // @author/package
+        const idx = def.indexOf('@', 1)
+        if (idx > 1) {
+          // @author/package@1.0.0
+          this.name = def.substring(0, idx)
+          this.version = def.substring(idx + 1)
+        } else {
+          this.name = def
+        }
       } else {
-        this.name = def
+        if (def.includes('@')) {
+          // name@1.0.0
+          let [name, version] = def.split('@', 2)
+          this.name = name
+          this.version = version
+        } else {
+          this.name = def
+        }
       }
     }
+  }
+
+  public get info() {
+    return { name: this.name, version: this.version }
   }
 
   public async install(): Promise<string> {
@@ -105,7 +123,7 @@ export class Installer extends EventEmitter {
         return
       }
     }
-    let tmpFolder = await fs.mkdtemp(path.join(os.tmpdir(), `${info.name}-`))
+    let tmpFolder = await fs.mkdtemp(path.join(os.tmpdir(), `${info.name.replace('/', '-')}-`))
     let url = info['dist.tarball']
     this.log(`Downloading from ${url}`)
     await download(url, { dest: tmpFolder, onProgress: p => this.log(`Download progress ${p}%`, true), extract: 'untar' })
@@ -153,7 +171,11 @@ export class Installer extends EventEmitter {
       await p
     }
     let jsonFile = path.resolve(this.root, global.hasOwnProperty('__TEST__') ? '' : '..', 'package.json')
-    let obj = JSON.parse(fs.readFileSync(jsonFile, 'utf8'))
+    let errors: ParseError[] = []
+    let obj = parse(fs.readFileSync(jsonFile, 'utf8'), errors, { allowTrailingComma: true })
+    if (errors && errors.length > 0) {
+      throw new Error(`Error on load ${jsonFile}`)
+    }
     obj.dependencies = obj.dependencies || {}
     if (this.url) {
       obj.dependencies[info.name] = this.url
