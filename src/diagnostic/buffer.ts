@@ -1,11 +1,17 @@
 import { Buffer, Neovim } from '@chemzqm/neovim'
 import debounce from 'debounce'
-import { Diagnostic, DiagnosticSeverity, Range } from 'vscode-languageserver-protocol'
+import { Diagnostic, DiagnosticSeverity, Position, Range } from 'vscode-languageserver-protocol'
 import { BufferSyncItem, DiagnosticConfig, LocationListItem } from '../types'
 import { equals } from '../util/object'
+import { lineInRange, positionInRange } from '../util/position'
 import { getLocationListItem, getNameFromSeverity, getSeverityType } from './util'
 const logger = require('../util/logger')('diagnostic-buffer')
 const signGroup = 'CocDiagnostic'
+
+const ErrorSymbol = Symbol('CocError')
+const WarningSymbol = Symbol('CocWarning')
+const InformationSymbol = Symbol('CocInformation')
+const HintSymbol = Symbol('CocHint')
 
 /**
  * Manage diagnostics of buffer, including:
@@ -131,10 +137,18 @@ export class DiagnosticBuffer implements BufferSyncItem {
     if (!this.config.enableSign) return
     this.clearSigns()
     let { nvim, bufnr } = this
+    let signsMap: Map<number, Symbol[]> = new Map()
     for (let diagnostic of diagnostics) {
       let { range, severity } = diagnostic
       let line = range.start.line
       let name = getNameFromSeverity(severity)
+      let exists = signsMap.get(line) || []
+      let s = getSymbol(severity)
+      if (exists.includes(s)) {
+        continue
+      }
+      exists.push(s)
+      signsMap.set(line, exists)
       nvim.call('sign_place', [0, signGroup, name, bufnr, { lnum: line + 1, priority: 14 - (severity || 0) }], true)
     }
   }
@@ -251,6 +265,20 @@ export class DiagnosticBuffer implements BufferSyncItem {
     }
   }
 
+  /**
+   * Get diagnostics at cursor position.
+   */
+  public getDiagnosticsAt(pos: Position, checkCurrentLine: boolean): Diagnostic[] {
+    let diagnostics = this.diagnostics.slice()
+    if (checkCurrentLine) {
+      diagnostics = diagnostics.filter(o => lineInRange(pos.line, o.range))
+    } else {
+      diagnostics = diagnostics.filter(o => positionInRange(pos, o.range) == 0)
+    }
+    diagnostics.sort((a, b) => a.severity - b.severity)
+    return diagnostics
+  }
+
   public dispose(): void {
     this._disposed = true
     this.clear()
@@ -263,4 +291,17 @@ function getCollections(diagnostics: ReadonlyArray<Diagnostic & { collection: st
     res.add(o.collection)
   })
   return res
+}
+
+function getSymbol(severity: DiagnosticSeverity): Symbol {
+  if (severity == DiagnosticSeverity.Error) {
+    return ErrorSymbol
+  }
+  if (severity == DiagnosticSeverity.Warning) {
+    return WarningSymbol
+  }
+  if (severity == DiagnosticSeverity.Information) {
+    return InformationSymbol
+  }
+  return HintSymbol
 }
