@@ -17,6 +17,7 @@ function! coc#highlight#ranges(bufnr, key, hlGroup, ranges) abort
   if !bufloaded(bufnr) || !exists('*getbufline')
     return
   endif
+  let synmaxcol = min([getbufvar(a:bufnr, '&synmaxcol', 1000), 1000])
   let srcId = s:create_namespace(a:key)
   for range in a:ranges
     let start = range['start']
@@ -25,6 +26,9 @@ function! coc#highlight#ranges(bufnr, key, hlGroup, ranges) abort
       let arr = getbufline(bufnr, lnum)
       let line = empty(arr) ? '' : arr[0]
       if empty(line)
+        continue
+      endif
+      if start['character'] > synmaxcol || end['character'] > synmaxcol
         continue
       endif
       " TODO don't know how to count UTF16 code point, should work most cases.
@@ -323,10 +327,12 @@ function! s:create_namespace(key) abort
   if type(a:key) == 0
     return a:key
   endif
-  if has('nvim')
-    return nvim_create_namespace('coc-'.a:key)
+  if has_key(s:namespace_map, a:key)
+    return s:namespace_map[a:key]
   endif
-  if !has_key(s:namespace_map, a:key)
+  if has('nvim')
+    let s:namespace_map[a:key] = nvim_create_namespace('coc-'.a:key)
+  else
     let s:namespace_map[a:key] = s:ns_id
     let s:ns_id = s:ns_id + 1
   endif

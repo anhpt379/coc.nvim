@@ -230,6 +230,10 @@ export default class Plugin extends EventEmitter {
     this.addAction('diagnosticToggle', () => {
       diagnosticManager.toggleDiagnostic()
     })
+    this.addAction('diagnosticToggleBuffer', async (bufnr?: number) => {
+      if (!bufnr) bufnr = await nvim.call('bufnr', ['%'])
+      diagnosticManager.toggleDiagnosticBuffer(bufnr)
+    })
     this.addAction('diagnosticNext', async severity => {
       await diagnosticManager.jumpNext(severity)
     })
@@ -245,6 +249,9 @@ export default class Plugin extends EventEmitter {
     this.addAction('jumpDefinition', openCommand => {
       return this.handler.gotoDefinition(openCommand)
     })
+    this.addAction('definitions', () => {
+      return this.handler.definitions()
+    })
     this.addAction('jumpDeclaration', openCommand => {
       return this.handler.gotoDeclaration(openCommand)
     })
@@ -256,6 +263,9 @@ export default class Plugin extends EventEmitter {
     })
     this.addAction('jumpReferences', openCommand => {
       return this.handler.gotoReferences(openCommand)
+    })
+    this.addAction('references', () => {
+      return this.handler.references()
     })
     this.addAction('jumpUsed', openCommand => {
       return this.handler.gotoReferences(openCommand, false)
