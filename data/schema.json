@@ -458,6 +458,11 @@
       "default": "length",
       "enum": ["length", "alphabetical", "none"]
     },
+    "suggest.snippetsSupport": {
+      "type": "boolean",
+      "description": "Set to false to disable snippets support of completion.",
+      "default": true
+    },
     "suggest.completionItemKindLabels": {
       "type": "object",
       "default": {},
@@ -1053,9 +1058,11 @@
       "default": null
     },
     "coc.preferences.jumpCommand": {
-      "type": "string",
-      "description": "Command used for location jump, like goto definition, goto references etc.",
-      "enum": ["edit", "split", "vsplit", "tabe", "drop", "tab drop", "pedit"],
+      "anyOf": [
+        {"type": "string", "enum": ["edit", "split", "vsplit", "tabe", "drop", "tab drop", "pedit"]},
+        {"type": "string", "minimum": 1}
+      ],
+      "description": "Command used for location jump, like goto definition, goto references etc. Can be also a custom command that gives file as an argument.",
       "default": "edit"
     },
     "coc.preferences.messageLevel": {
@@ -1089,11 +1096,6 @@
       "maximum": 5000,
       "description": "Highlight timeout for buffer in floating window."
     },
-    "coc.preferences.snippets.enable": {
-      "type": "boolean",
-      "description": "Set to false to disable snippets support.",
-      "default": true
-    },
     "coc.preferences.floatActions": {
       "type": "boolean",
       "description": "Set to false to disable float/popup support for actions menu, won't work on vim without float or popup window support.",
@@ -1107,6 +1109,11 @@
     "coc.preferences.enableMarkdown": {
       "type": "boolean",
       "description": "Tell the language server that markdown text format is supported, note that markdown text may not rendered as expected.",
+      "default": true
+    },
+    "coc.preferences.excludeImageLinksInMarkdownDocument": {
+      "type": "boolean",
+      "description": "Exclude image links from document markdown text",
       "default": true
     },
     "coc.preferences.silentAutoupdate": {

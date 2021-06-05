@@ -3105,9 +3105,14 @@ export abstract class BaseLanguageClient {
     } else {
       this._outputChannel = undefined
     }
+    let disableSnippetCompletion = false
+    let suggest = workspace.getConfiguration('suggest')
+    if (suggest.get<boolean>('snippetsSupport', true) === false || clientOptions.disableSnippetCompletion) {
+      disableSnippetCompletion = true
+    }
     this._clientOptions = {
       disableWorkspaceFolders: clientOptions.disableWorkspaceFolders,
-      disableSnippetCompletion: clientOptions.disableSnippetCompletion,
+      disableSnippetCompletion,
       disableDynamicRegister: clientOptions.disableDynamicRegister,
       disableDiagnostics: clientOptions.disableDiagnostics,
       disableCompletion: clientOptions.disableCompletion,
@@ -3565,7 +3570,7 @@ export abstract class BaseLanguageClient {
     return this._connectionPromise
   }
 
-  private resolveRootPath(): string | null {
+  private resolveRootPath(): string | null | false {
     if (this._clientOptions.workspaceFolder) {
       return URI.parse(this._clientOptions.workspaceFolder.uri).fsPath
     }
@@ -3581,7 +3586,7 @@ export abstract class BaseLanguageClient {
         resolved = resolveRoot(dir, rootPatterns, workspace.cwd)
       }
     }
-    if (required && !resolved) return null
+    if (required && !resolved) return false
     let rootPath = resolved || workspace.rootPath || workspace.cwd
     if (rootPath === os.homedir() || (ignoredRootPaths && ignoredRootPaths.includes(rootPath))) {
       this.warn(`Ignored rootPath ${rootPath} of client "${this._id}"`)
@@ -3594,7 +3599,10 @@ export abstract class BaseLanguageClient {
     this.refreshTrace(connection, false)
     let { initializationOptions, progressOnInitialization } = this._clientOptions
     let rootPath = this.resolveRootPath()
-    if (!rootPath) return
+    if (rootPath === false) {
+      console.warn(`required root pattern not found, server not started.`)
+      return
+    }
     let initParams: any = {
       processId: process.pid,
       rootPath: rootPath ? rootPath : null,

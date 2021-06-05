@@ -462,6 +462,7 @@ export class Workspace implements IWorkspace {
     for (let doc of this.buffers.values()) {
       if (!doc) continue
       if (doc.uri === uri) return doc
+      if (path.resolve(doc.uri) === path.resolve(uri)) return doc
       if (caseInsensitive && doc.uri.toLowerCase() === uri.toLowerCase()) return doc
     }
     return null
@@ -641,12 +642,12 @@ export class Workspace implements IWorkspace {
   public async selectRange(range: Range): Promise<void> {
     let { nvim } = this
     let { start, end } = range
-    let [bufnr, ve, selection] = await nvim.eval(`[bufnr('%'), &virtualedit, &selection, mode()]`) as [number, string, string, string]
-    let document = this.getDocument(bufnr)
-    if (!document) return
-    let line = document.getline(start.line)
+    let [bufnr, ve, selection] = await nvim.eval(`[bufnr('%'), &virtualedit, &selection]`) as [number, string, string]
+    let doc = this.getDocument(bufnr)
+    if (!doc || !doc.attached) return
+    let line = doc.getline(start.line)
     let col = line ? byteLength(line.slice(0, start.character)) : 0
-    let endLine = document.getline(end.line)
+    let endLine = doc.getline(end.line)
     let endCol = endLine ? byteLength(endLine.slice(0, end.character)) : 0
     let move_cmd = ''
     let resetVirtualEdit = false
