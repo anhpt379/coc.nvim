@@ -1,7 +1,8 @@
 import { Neovim } from '@chemzqm/neovim'
 import { Disposable, Emitter, Event, Location, Range, TextDocumentEdit, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
-import { ConfigurationChangeEvent } from '../../types'
+import languages from '../../languages'
+import { ConfigurationChangeEvent, HandlerDelegate } from '../../types'
 import { disposeAll } from '../../util'
 import { getFileLineCount } from '../../util/fs'
 import window from '../../window'
@@ -16,7 +17,6 @@ let refactorId = 0
 export { FileItem }
 
 export default class Refactor {
-  private nvim: Neovim
   private srcId: number
   private timer: NodeJS.Timer
   private buffers: Map<number, RefactorBuffer> = new Map()
@@ -24,8 +24,10 @@ export default class Refactor {
   private disposables: Disposable[] = []
   private readonly _onCreate = new Emitter<number>()
   public readonly onCreate: Event<number> = this._onCreate.event
-  constructor() {
-    this.nvim = workspace.nvim
+  constructor(
+    private nvim: Neovim,
+    private handler: HandlerDelegate
+  ) {
     if (workspace.isNvim && this.nvim.hasFunction('nvim_buf_set_virtual_text')) {
       this.srcId = workspace.createNameSpace('coc-refactor')
     }
@@ -55,8 +57,27 @@ export default class Refactor {
     })
   }
 
-  public getBuffer(bufnr: number): RefactorBuffer {
-    return this.buffers.get(bufnr)
+  /**
+   * Refactor of current symbol
+   */
+  public async doRefactor(): Promise<void> {
+    let { doc, position } = await this.handler.getCurrentState()
+    if (!languages.hasProvider('rename', doc.textDocument)) {
+      throw new Error(`Rename provider not found for current buffer`)
+    }
+    await doc.synchronize()
+    let edit = await this.handler.withRequestToken('refactor', async token => {
+      let res = await languages.prepareRename(doc.textDocument, position, token)
+      if (token.isCancellationRequested) return null
+      if (res === false) throw new Error(`Provider returns null on prepare, unable to rename at current position`)
+      let edit = await languages.provideRenameEdits(doc.textDocument, position, 'NewName', token)
+      if (token.isCancellationRequested) return null
+      if (!edit) throw new Error('Provider returns null for rename edits.')
+      return edit
+    })
+    if (edit) {
+      await this.fromWorkspaceEdit(edit, doc.filetype)
+    }
   }
 
   /**
@@ -68,6 +89,15 @@ export default class Refactor {
     let cwd = await this.nvim.call('getcwd', [])
     let search = new Search(this.nvim)
     await search.run(args, cwd, buf)
+  }
+
+  public async save(bufnr: number): Promise<boolean> {
+    let buf = this.buffers.get(bufnr)
+    if (buf) return await buf.save()
+  }
+
+  public getBuffer(bufnr: number): RefactorBuffer {
+    return this.buffers.get(bufnr)
   }
 
   /**
@@ -177,11 +207,6 @@ export default class Refactor {
     let buf = await this.createRefactorBuffer(filetype)
     await buf.addFileItems(items)
     return buf
-  }
-
-  public async save(bufnr: number): Promise<boolean> {
-    let buf = this.buffers.get(bufnr)
-    if (buf) return await buf.save()
   }
 
   private async getLineCount(uri: string): Promise<number> {

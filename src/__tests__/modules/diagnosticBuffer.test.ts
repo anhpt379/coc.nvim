@@ -5,6 +5,7 @@ import { Range, DiagnosticSeverity, Diagnostic, DiagnosticTag } from 'vscode-lan
 
 let nvim: Neovim
 const config: any = {
+  autoRefresh: true,
   checkCurrentLine: false,
   locationlistUpdate: true,
   enableSign: true,
@@ -106,7 +107,6 @@ describe('diagnostic buffer', () => {
 
   it('should add deprecated highlight', async () => {
     let diagnostic = createDiagnostic('foo', Range.create(0, 0, 0, 1), DiagnosticSeverity.Information, [DiagnosticTag.Deprecated])
-    console.log(diagnostic)
     let buf = await createDiagnosticBuffer()
     await nvim.setLine('foo')
     nvim.pauseNotification()
@@ -130,6 +130,6 @@ describe('diagnostic buffer', () => {
     await helper.wait(50)
     let buffer = await nvim.buffer
     let res = await buffer.getVar("coc_diagnostic_info")
-    expect(res).toEqual({ lnums: [0, 0, 0, 0], error: 0, hint: 0, information: 0, warning: 0 })
+    expect(res == null).toBe(true)
   })
 })

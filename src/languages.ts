@@ -1,10 +1,10 @@
 import { Neovim } from '@chemzqm/neovim'
-import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CancellationTokenSource, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, FoldingRange, FormattingOptions, Hover, InsertReplaceEdit, InsertTextFormat, LinkedEditingRanges, Location, LocationLink, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SemanticTokensLegend, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CancellationTokenSource, CodeAction, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, FoldingRange, FormattingOptions, Hover, InsertReplaceEdit, InsertTextFormat, LinkedEditingRanges, Location, LocationLink, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SemanticTokensLegend, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import commands from './commands'
 import diagnosticManager from './diagnostic/manager'
 import { CallHierarchyProvider, CodeActionProvider, CodeLensProvider, CompletionItemProvider, DeclarationProvider, DefinitionProvider, DocumentColorProvider, DocumentFormattingEditProvider, DocumentHighlightProvider, DocumentLinkProvider, DocumentRangeFormattingEditProvider, DocumentRangeSemanticTokensProvider, DocumentSemanticTokensProvider, DocumentSymbolProvider, FoldingContext, FoldingRangeProvider, HoverProvider, ImplementationProvider, LinkedEditingRangeProvider, OnTypeFormattingEditProvider, ReferenceContext, ReferenceProvider, RenameProvider, SelectionRangeProvider, SignatureHelpProvider, TypeDefinitionProvider, WorkspaceSymbolProvider } from './provider'
-import CodeActionManager from './provider/codeActionmanager'
+import CodeActionManager from './provider/codeActionManager'
 import CodeLensManager from './provider/codeLensManager'
 import DeclarationManager from './provider/declarationManager'
 import DefinitionManager from './provider/definitionManager'
@@ -35,7 +35,6 @@ import * as complete from './util/complete'
 import { getChangedFromEdits, rangeOverlap } from './util/position'
 import { byteIndex, byteLength, byteSlice } from './util/string'
 import window from './window'
-import { CodeAction } from './types'
 import workspace from './workspace'
 const logger = require('./util/logger')('languages')
 
@@ -397,12 +396,16 @@ class Languages {
     return await this.documentColorManager.provideColorPresentations(color, document, token)
   }
 
-  public async getCodeLens(document: TextDocument, token: CancellationToken): Promise<CodeLens[]> {
+  public async getCodeLens(document: TextDocument, token: CancellationToken): Promise<(CodeLens | null)[]> {
     return await this.codeLensManager.provideCodeLenses(document, token)
   }
 
   public async resolveCodeLens(codeLens: CodeLens, token: CancellationToken): Promise<CodeLens> {
     return await this.codeLensManager.resolveCodeLens(codeLens, token)
+  }
+
+  public async resolveCodeAction(codeAction: CodeAction, token: CancellationToken): Promise<CodeAction> {
+    return await this.codeActionManager.resolveCodeAction(codeAction, token)
   }
 
   public async provideDocumentOnTypeEdits(
@@ -414,7 +417,7 @@ class Languages {
     return this.onTypeFormatManager.onCharacterType(character, document, position, token)
   }
 
-  public hasOnTypeProvider(character: string, document: TextDocument): boolean {
+  public canFormatOnType(character: string, document: TextDocument): boolean {
     return this.onTypeFormatManager.getProvider(document, character) != null
   }
 
@@ -460,6 +463,8 @@ class Languages {
 
   public hasProvider(id: ProviderName, document: TextDocument): boolean {
     switch (id) {
+      case 'formatOnType':
+        return this.onTypeFormatManager.hasProvider(document)
       case 'rename':
         return this.renameManager.hasProvider(document)
       case 'onTypeEdit':
@@ -528,6 +533,7 @@ class Languages {
     allCommitCharacters: string[],
     priority?: number | undefined
   ): ISource {
+    let filetype: string
     // track them for resolve
     let completeItems: CompletionItem[] = []
     // line used for TextEdit
@@ -548,6 +554,7 @@ class Languages {
       },
       doComplete: async (opt: CompleteOption, token: CancellationToken): Promise<CompleteResult | null> => {
         let { triggerCharacter, bufnr } = opt
+        filetype = opt.filetype
         resolvedIndexes = new Set()
         let isTrigger = triggerCharacters && triggerCharacters.includes(triggerCharacter)
         let triggerKind: CompletionTriggerKind = CompletionTriggerKind.Invoked
@@ -593,13 +600,26 @@ class Languages {
         }
       },
       onCompleteResolve: async (item: VimCompleteItem, token: CancellationToken): Promise<void> => {
-        let resolving = completeItems[item.index]
-        if (!resolving) return
-        if (hasResolve && !resolvedIndexes.has(item.index)) {
-          let resolved = await Promise.resolve(provider.resolveCompletionItem(resolving, token))
-          if (token.isCancellationRequested) return
-          resolvedIndexes.add(item.index)
-          if (resolved) Object.assign(resolving, resolved)
+        let { index } = item
+        let resolving = completeItems[index]
+        if (!resolving || resolvedIndexes.has(index)) return
+        if (hasResolve) {
+          token.onCancellationRequested(() => {
+            resolvedIndexes.delete(index)
+          })
+          resolvedIndexes.add(index)
+          try {
+            let resolved = await Promise.resolve(provider.resolveCompletionItem(Object.assign({}, resolving), token))
+            if (token.isCancellationRequested) return
+            if (resolved) {
+              Object.assign(resolving, resolved)
+            } else {
+              resolvedIndexes.delete(index)
+            }
+          } catch (e) {
+            resolvedIndexes.delete(index)
+            logger.error(`Error on complete resolve: ${e.message}`, e.stack)
+          }
         }
         if (item.documentation == null) {
           let { documentation, detail } = resolving
@@ -609,7 +629,6 @@ class Languages {
             detail = detail.replace(/\n\s*/g, ' ')
             if (detail.length) {
               let isText = /^[\w-\s.,\t]+$/.test(detail)
-              let filetype = isText ? 'txt' : await workspace.nvim.eval('&filetype') as string
               docs.push({ filetype: isText ? 'txt' : filetype, content: detail })
             }
           }

@@ -307,7 +307,7 @@ function! s:Enable(initialize)
     autocmd BufWinEnter         * call s:Autocmd('BufWinEnter', +expand('<abuf>'), win_getid())
     autocmd FileType            * call s:Autocmd('FileType', expand('<amatch>'), +expand('<abuf>'))
     autocmd CompleteDone        * call s:Autocmd('CompleteDone', get(v:, 'completed_item', {}))
-    autocmd InsertCharPre       * call s:Autocmd('InsertCharPre', v:char)
+    autocmd InsertCharPre       * call s:Autocmd('InsertCharPre', v:char, bufnr('%'))
     if exists('##TextChangedP')
       autocmd TextChangedP        * call s:Autocmd('TextChangedP', +expand('<abuf>'), {'lnum': line('.'), 'col': col('.'), 'pre': strpart(getline('.'), 0, col('.') - 1), 'changedtick': b:changedtick})
     endif
@@ -369,6 +369,8 @@ function! s:Hi() abort
   hi default link CocWarningHighlight CocUnderline
   hi default link CocInfoHighlight    CocUnderline
   hi default link CocHintHighlight    CocUnderline
+  hi default link CocDeprecatedHighlight CocStrikeThrough
+  hi default link CocUnusedHighlight     CocFadeOut
   hi default link CocListMode ModeMsg
   hi default link CocListPath Comment
   hi default link CocHighlightText  CursorColumn

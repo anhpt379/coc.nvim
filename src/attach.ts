@@ -49,14 +49,14 @@ export default (opts: Attach, requestApi = true): Plugin => {
         await events.fire(method, args)
         break
       case 'CocAutocmd':
-        logger.debug('Notification autocmd:', ...args)
+        logger.trace('Notification autocmd:', ...args)
         await events.fire(args[0], args.slice(1))
         break
       default: {
         let exists = plugin.hasAction(method)
         if (!exists) {
           if (global.hasOwnProperty('__TEST__')) return
-          console.error(`action "${method}" not registered`)
+          console.error(`action "${method}" not exists`)
           return
         }
         try {
@@ -68,7 +68,7 @@ export default (opts: Attach, requestApi = true): Plugin => {
           await plugin.ready
           await plugin.cocAction(method, ...args)
         } catch (e) {
-          console.error(`Error on notification "${method}": ${e.message || e.toString()}`)
+          console.error(`Error on "${method}": ${e.message || e.toString()}`)
           logger.error(`Notification error:`, method, args, e)
         }
       }
@@ -76,21 +76,26 @@ export default (opts: Attach, requestApi = true): Plugin => {
   })
 
   nvim.on('request', async (method: string, args, resp) => {
-    if (method != 'redraw') {
-      logger.info('receive request:', method, args)
+    if (method == 'redraw') {
+      // ignore redraw from neovim
+      resp.send()
+      return
     }
     let timer = setTimeout(() => {
       logger.error('Request cost more than 3s', method, args)
     }, 3000)
     try {
       if (method == 'CocAutocmd') {
-        logger.debug('Request autocmd:', ...args)
+        logger.trace('Request autocmd:', ...args)
         await events.fire(args[0], args.slice(1))
-        resp.send()
+        resp.send(undefined)
       } else {
         if (!plugin.isReady) {
-          logger.warn(`Plugin not ready when received "${method}"`, args)
+          logger.warn(`Plugin not ready on request "${method}"`, args)
+          resp.send('Plugin not ready', true)
+          return
         }
+        logger.info('Request action:', method, args)
         let res = await plugin.cocAction(method, ...args)
         resp.send(res)
       }

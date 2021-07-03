@@ -8,6 +8,9 @@ let s:borderjoinchars = get(g:, 'coc_border_joinchars', ['┬', '┤', '┴', '�
 let s:prompt_win_width = get(g:, 'coc_prompt_win_width', 32)
 let s:prompt_win_bufnr = 0
 let s:float_supported = exists('*nvim_open_win') || has('patch-8.1.1719')
+let s:popup_list_api = exists('*popup_list')
+" Popup ids, used when popup_list() not exists
+let s:popup_list = []
 " winvar: border array of numbers,  button boolean
 
 " Check visible float/popup exists.
@@ -115,6 +118,9 @@ function! coc#float#create_float_win(winid, bufnr, config) abort
       let opts['border'] = a:config['border']
     endif
     let winid = popup_create(bufnr, opts)
+    if !s:popup_list_api
+      call add(s:popup_list, winid)
+    endif
     if winid == 0
       return []
     endif
@@ -131,6 +137,7 @@ function! coc#float#create_float_win(winid, bufnr, config) abort
     let hlgroup = get(a:config, 'highlight', 'CocFloating')
     call setwinvar(winid, '&winhl', 'Normal:'.hlgroup.',NormalNC:'.hlgroup.',FoldColumn:'.hlgroup)
     call setwinvar(winid, '&signcolumn', 'no')
+    call setwinvar(winid, '&foldenable', 0)
     " cursorline highlight not work on old neovim
     call setwinvar(winid, '&cursorline', 0)
     call setwinvar(winid, 'border', get(a:config, 'border', []))
@@ -271,6 +278,7 @@ endfunction
 " Create padding window by config of current window & border config
 function! coc#float#nvim_right_pad(config, winid, hlgroup, related) abort
   let winid = coc#float#get_related(a:winid, 'pad')
+  let bufnr = 0
   let config = {
         \ 'relative': a:config['relative'],
         \ 'width': 1,
@@ -280,15 +288,22 @@ function! coc#float#nvim_right_pad(config, winid, hlgroup, related) abort
         \ 'focusable': v:false,
         \ 'style': 'minimal',
         \ }
-  if winid
+  if winid && nvim_win_is_valid(winid)
+    let bufnr = nvim_win_get_buf(winid)
     noa call nvim_win_close(winid, 1)
   endif
-  let bufnr = coc#float#create_buf(0, repeat([''], a:config['height']))
+  let bufnr = coc#float#create_buf(bufnr, repeat([''], a:config['height']))
   noa let winid = nvim_open_win(bufnr, 0, config)
   if winid
-    " neovim'bug: the content shown in window could be wired.
-    call setwinvar(winid, '&foldcolumn', 1)
-    call setwinvar(winid, '&winhl', 'FoldColumn:'.a:hlgroup)
+    " minimal not work
+    if !has('nvim-0.4.3')
+      call setwinvar(winid, '&colorcolumn', 0)
+      call setwinvar(winid, '&number', 0)
+      call setwinvar(winid, '&relativenumber', 0)
+      call setwinvar(winid, '&foldcolumn', 0)
+      call setwinvar(winid, '&signcolumn', 0)
+    endif
+    call setwinvar(winid, '&winhl', 'Normal:'.a:hlgroup.',NormalNC:'.a:hlgroup)
     call setwinvar(winid, 'target_winid', a:winid)
     call setwinvar(winid, 'kind', 'pad')
     call add(a:related, winid)
@@ -345,6 +360,12 @@ function! coc#float#nvim_scrollbar(winid) abort
   endif
   let config = nvim_win_get_config(a:winid)
   let [row, column] = nvim_win_get_position(a:winid)
+  let relative = 'editor'
+  if row == 0 && column == 0
+    " fix bad value when ext_multigrid is enabled. https://github.com/neovim/neovim/issues/11935
+    let [row, column] = [config.row, config.col]
+    let relative = config.relative
+  endif
   let width = nvim_win_get_width(a:winid)
   let height = nvim_win_get_height(a:winid)
   let bufnr = winbufnr(a:winid)
@@ -370,7 +391,7 @@ function! coc#float#nvim_scrollbar(winid) abort
   let opts = {
         \ 'row': move_down ? row + 1 : row,
         \ 'col': column + width,
-        \ 'relative': 'editor',
+        \ 'relative': relative,
         \ 'width': 1,
         \ 'height': height,
         \ 'focusable': v:false,
@@ -470,13 +491,13 @@ function! coc#float#create_cursor_float(winid, bufnr, lines, config) abort
   endif
   let width = dimension['width']
   let lines = map(a:lines, {_, s -> s =~# '^—' ? repeat('—', width) : s})
-  let config = extend({'lines': lines, 'relative': 'cursor'}, a:config)
-  let config = extend(config, dimension)
+  let config = extend(extend({'lines': lines, 'relative': 'cursor'}, a:config), dimension)
   call coc#float#close_auto_hide_wins(a:winid)
   let res = coc#float#create_float_win(a:winid, a:bufnr, config)
   if empty(res)
     return v:null
   endif
+  let alignTop = dimension['row'] < 0
   let winid = res[0]
   let bufnr = res[1]
   call coc#highlight#add_highlights(winid, get(a:config, 'codes', []), get(a:config, 'highlights', []))
@@ -484,10 +505,10 @@ function! coc#float#create_cursor_float(winid, bufnr, lines, config) abort
   if has('nvim')
     call coc#float#nvim_scrollbar(winid)
   endif
-  return [currbuf, pos, winid, bufnr]
+  return [currbuf, pos, winid, bufnr, alignTop]
 endfunction
 
-" Create float window for input, neovim only since vim doesn't support focus
+" Create float window for input
 function! coc#float#create_prompt_win(title, default, opts) abort
   call coc#float#close_auto_hide_wins()
   " Calculate col
@@ -577,11 +598,9 @@ function! coc#float#get_float_win() abort
         endif
       endif
     endfor
-  elseif exists('*popup_list')
-    let arr = filter(popup_list(), 'popup_getpos(v:val)["visible"]')
-    if !empty(arr)
-      return arr[0]
-    endif
+  else
+    let ids = s:popup_list_api ?  popup_list() : s:popup_list
+    return get(filter(ids, 's:popup_visible(v:val)'), 0, 0)
   endif
   return 0
 endfunction
@@ -589,8 +608,11 @@ endfunction
 function! coc#float#get_float_win_list(...) abort
   let res = []
   let all = get(a:, 1, 0)
-  if s:is_vim && exists('*popup_list')
-    return filter(popup_list(), 'popup_getpos(v:val)["visible"]'.(all ? '' : '&& getwinvar(v:val, "float", 0)'))
+  if s:is_vim
+    if s:popup_list_api
+      return filter(popup_list(), 'popup_getpos(v:val)["visible"]'.(all ? '' : '&& getwinvar(v:val, "float", 0)'))
+    endif
+    return filter(s:popup_list, 's:popup_visible(v:val)')
   elseif has('nvim') && exists('*nvim_win_get_config')
     let res = []
     for i in range(1, winnr('$'))
@@ -795,6 +817,9 @@ function! coc#float#check_related() abort
       call add(invalids, id)
     endif
   endfor
+  if !s:popup_list_api
+    let s:popup_list = filter(ids, "index(invalids, v:val) == -1")
+  endif
   for id in invalids
     call coc#float#close(id)
   endfor
@@ -1052,6 +1077,9 @@ function! coc#float#vim_buttons(winid, config) abort
           \ }, options)
     call extend(options, config)
     let winid = popup_create(bufnr, options)
+    if !s:popup_list_api
+      call add(s:popup_list, winid)
+    endif
   endif
   if winid != 0
     if !empty(borderhighlight)

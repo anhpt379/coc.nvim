@@ -35,14 +35,25 @@ export interface CursorPosition {
   insert: boolean
 }
 
+export interface LatestInsert {
+  bufnr: number
+  character: string
+  timestamp: number
+}
+
 class Events {
 
   private handlers: Map<string, Function[]> = new Map()
   private _cursor: CursorPosition
+  private _latestInsert: LatestInsert
   private insertMode = false
 
   public get cursor(): CursorPosition {
     return this._cursor
+  }
+
+  public get latestInsert(): LatestInsert | undefined {
+    return this._latestInsert ? Object.assign({}, this._latestInsert) : undefined
   }
 
   public async fire(event: string, args: any[]): Promise<void> {
@@ -58,6 +69,9 @@ class Events {
       this.insertMode = false
       await this.fire('InsertLeave', [args[0]])
     }
+    if (event == 'InsertCharPre') {
+      this._latestInsert = { bufnr: args[1], character: args[0], timestamp: Date.now() }
+    }
     if (event == 'CursorMoved' || event == 'CursorMovedI') {
       let cursor = {
         bufnr: args[0],
@@ -65,7 +79,7 @@ class Events {
         col: args[1][1],
         insert: event == 'CursorMovedI'
       }
-      // not handle CursorMoved when it's not moved at all
+      // Avoid CursorMoved event when it's not moved at all
       if (this._cursor && equals(this._cursor, cursor)) return
       this._cursor = cursor
     }
@@ -73,10 +87,8 @@ class Events {
       try {
         await Promise.all(cbs.map(fn => fn(args)))
       } catch (e) {
-        if (e.message && e.message.indexOf('transport disconnected') == -1) {
-          console.error(`Error on ${event}: ${e.message}${e.stack ? '\n' + e.stack : ''} `)
-        }
-        logger.error(`Handler Error on ${event}`, e.stack)
+        if (e.message && e.message.indexOf('transport disconnected') == -1) return
+        logger.error(`Error on event: ${event}`, e.stack)
       }
     }
   }
@@ -96,7 +108,7 @@ class Events {
   public on(event: 'Command', handler: (name: string) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
   public on(event: 'MenuPopupChanged', handler: (event: PopupChangeEvent, cursorline: number) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
   public on(event: 'CompleteDone', handler: (item: VimCompleteItem) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
-  public on(event: 'InsertCharPre', handler: (character: string) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
+  public on(event: 'InsertCharPre', handler: (character: string, bufnr: number) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
   public on(event: 'FileType', handler: (filetype: string, bufnr: number) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
   public on(event: 'BufWinEnter' | 'BufWinLeave', handler: (bufnr: number, winid: number) => Result, thisArg?: any, disposables?: Disposable[]): Disposable
   public on(event: 'DirChanged', handler: (cwd: string) => Result, thisArg?: any, disposables?: Disposable[]): Disposable

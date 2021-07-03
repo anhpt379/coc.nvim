@@ -2,7 +2,7 @@ import { NeovimClient as Neovim } from '@chemzqm/neovim'
 import { EventEmitter } from 'events'
 import path from 'path'
 import fs from 'fs'
-import { CancellationTokenSource, CodeActionKind } from 'vscode-languageserver-protocol'
+import { CancellationTokenSource, CodeAction, CodeActionKind } from 'vscode-languageserver-protocol'
 import { URI } from 'vscode-uri'
 import commandManager from './commands'
 import completion from './completion'
@@ -20,7 +20,9 @@ import { CONFIG_FILE_NAME } from './util'
 import workspace from './workspace'
 import window from './window'
 import events from './events'
+import matchAll from 'string.prototype.matchall'
 const logger = require('./util/logger')('plugin')
+matchAll.shim()
 
 declare const REVISION
 
@@ -39,12 +41,12 @@ export default class Plugin extends EventEmitter {
     })
     this.cursors = new Cursors(nvim)
     this.addAction('hasProvider', (id: string) => this.handler.hasProvider(id))
-    this.addAction('getTagList', async () => await this.handler.getTagList())
+    this.addAction('getTagList', async () => await this.handler.locations.getTagList())
     this.addAction('hasSelected', () => completion.hasSelected())
     this.addAction('listNames', () => listManager.names)
     this.addAction('listDescriptions', () => listManager.descriptions)
     this.addAction('listLoadItems', async (name: string) => await listManager.loadItems(name))
-    this.addAction('search', (...args: string[]) => this.handler.search(args))
+    this.addAction('search', (...args: string[]) => this.handler.refactor.search(args))
     this.addAction('cursorsSelect', (bufnr: number, kind: string, mode: string) => this.cursors.select(bufnr, kind, mode))
     this.addAction('fillDiagnostics', (bufnr: number) => diagnosticManager.setLocationlist(bufnr))
     this.addAction('getConfig', async key => {
@@ -65,7 +67,7 @@ export default class Plugin extends EventEmitter {
       await extensions.installExtensions(list)
     })
     this.addAction('saveRefactor', async (bufnr: number) => {
-      await this.handler.saveRefactor(bufnr)
+      await this.handler.refactor.save(bufnr)
     })
     this.addAction('updateExtensions', async (sync?: boolean) => {
       await extensions.updateExtensions(sync)
@@ -75,7 +77,7 @@ export default class Plugin extends EventEmitter {
       await this.ready
       await listManager.start(args)
     })
-    this.addAction('selectSymbolRange', (inner: boolean, visualmode: string, supportedSymbols: string[]) => this.handler.selectSymbolRange(inner, visualmode, supportedSymbols))
+    this.addAction('selectSymbolRange', (inner: boolean, visualmode: string, supportedSymbols: string[]) => this.handler.symbols.selectSymbolRange(inner, visualmode, supportedSymbols))
     this.addAction('listResume', (name?: string) => listManager.resume(name))
     this.addAction('listCancel', () => listManager.cancel(true))
     this.addAction('listPrev', (name?: string) => listManager.previous(name))
@@ -190,7 +192,7 @@ export default class Plugin extends EventEmitter {
       channel.show()
     })
     this.addAction('findLocations', (id: string, method: string, params: any, openCommand?: string | false) => {
-      return this.handler.findLocations(id, method, params, openCommand)
+      return this.handler.locations.findLocations(id, method, params, openCommand)
     })
     this.addAction('links', () => {
       return this.handler.links()
@@ -199,13 +201,13 @@ export default class Plugin extends EventEmitter {
       return this.handler.openLink()
     })
     this.addAction('pickColor', () => {
-      return this.handler.pickColor()
+      return this.handler.colors.pickColor()
     })
     this.addAction('colorPresentation', () => {
-      return this.handler.pickPresentation()
+      return this.handler.colors.pickPresentation()
     })
-    this.addAction('highlight', async () => {
-      await this.handler.highlight()
+    this.addAction('highlight', () => {
+      return this.handler.documentHighlighter.highlight()
     })
     this.addAction('fold', (kind?: string) => {
       return this.handler.fold(kind)
@@ -224,6 +226,9 @@ export default class Plugin extends EventEmitter {
     })
     this.addAction('toggleSource', name => {
       sources.toggleSource(name)
+    })
+    this.addAction('diagnosticRefresh', async (bufnr?: number) => {
+      diagnosticManager.refresh(bufnr)
     })
     this.addAction('diagnosticInfo', async () => {
       await diagnosticManager.echoMessage()
@@ -248,57 +253,60 @@ export default class Plugin extends EventEmitter {
       return diagnosticManager.getDiagnosticList()
     })
     this.addAction('jumpDefinition', openCommand => {
-      return this.handler.gotoDefinition(openCommand)
+      return this.handler.locations.gotoDefinition(openCommand)
     })
     this.addAction('definitions', () => {
-      return this.handler.definitions()
+      return this.handler.locations.definitions()
     })
     this.addAction('jumpDeclaration', openCommand => {
-      return this.handler.gotoDeclaration(openCommand)
+      return this.handler.locations.gotoDeclaration(openCommand)
     })
     this.addAction('declarations', () => {
-      return this.handler.declarations()
+      return this.handler.locations.declarations()
     })
     this.addAction('jumpImplementation', openCommand => {
-      return this.handler.gotoImplementation(openCommand)
+      return this.handler.locations.gotoImplementation(openCommand)
     })
     this.addAction('implementations', () => {
-      return this.handler.implementations()
+      return this.handler.locations.implementations()
     })
     this.addAction('jumpTypeDefinition', openCommand => {
-      return this.handler.gotoTypeDefinition(openCommand)
+      return this.handler.locations.gotoTypeDefinition(openCommand)
     })
     this.addAction('typeDefinitions', () => {
-      return this.handler.typeDefinitions()
+      return this.handler.locations.typeDefinitions()
     })
     this.addAction('jumpReferences', openCommand => {
-      return this.handler.gotoReferences(openCommand)
+      return this.handler.locations.gotoReferences(openCommand)
     })
     this.addAction('references', () => {
-      return this.handler.references()
+      return this.handler.locations.references()
     })
     this.addAction('jumpUsed', openCommand => {
-      return this.handler.gotoReferences(openCommand, false)
+      return this.handler.locations.gotoReferences(openCommand, false)
     })
     this.addAction('doHover', hoverTarget => {
-      return this.handler.onHover(hoverTarget)
+      return this.handler.hover.onHover(hoverTarget)
     })
     this.addAction('getHover', () => {
-      return this.handler.getHover()
+      return this.handler.hover.getHover()
     })
     this.addAction('showSignatureHelp', () => {
-      return this.handler.showSignatureHelp()
+      return this.handler.signature.triggerSignatureHelp()
     })
     this.addAction('documentSymbols', async (bufnr?: number) => {
-      if (!bufnr) bufnr = await nvim.call('bufnr', ['%'])
-      return await this.handler.getDocumentSymbols(bufnr)
+      if (!bufnr) {
+        let doc = await workspace.document
+        bufnr = doc.bufnr
+      }
+      return await this.handler.symbols.getDocumentSymbols(bufnr)
     })
     this.addAction('ensureDocument', async () => {
       let doc = await workspace.document
       return doc && doc.attached
     })
     this.addAction('symbolRanges', () => {
-      return this.handler.getSymbolsRanges()
+      return this.handler.documentHighlighter.getSymbolsRanges()
     })
     this.addAction('selectionRanges', () => {
       return this.handler.getSelectionRanges()
@@ -314,10 +322,10 @@ export default class Plugin extends EventEmitter {
       return await languages.getWorkspaceSymbols(input, tokenSource.token)
     })
     this.addAction('formatSelected', mode => {
-      return this.handler.documentRangeFormatting(mode)
+      return this.handler.format.formatCurrentRange(mode)
     })
     this.addAction('format', () => {
-      return this.handler.documentFormatting()
+      return this.handler.format.formatCurrentBuffer()
     })
     this.addAction('commands', () => {
       return this.handler.getCommands()
@@ -329,34 +337,44 @@ export default class Plugin extends EventEmitter {
       return services.toggle(name)
     })
     this.addAction('codeAction', (mode, only) => {
-      return this.handler.doCodeAction(mode, only)
+      return this.handler.codeActions.doCodeAction(mode, only)
     })
     this.addAction('organizeImport', () => {
-      return this.handler.organizeImport()
+      return this.handler.codeActions.organizeImport()
     })
     this.addAction('fixAll', () => {
-      return this.handler.doCodeAction(null, [CodeActionKind.SourceFixAll])
+      return this.handler.codeActions.doCodeAction(null, [CodeActionKind.SourceFixAll])
     })
+    // save actions send to vim, for provider resolve
+    let codeActions: CodeAction[] = []
     this.addAction('doCodeAction', codeAction => {
-      return this.handler.applyCodeAction(codeAction)
+      if (codeAction.index == null) {
+        throw new Error(`index should exists with codeAction`)
+      }
+      let action = codeActions[codeAction.index]
+      if (!action) throw new Error(`invalid codeAction index: ${codeAction.index}`)
+      return this.handler.codeActions.applyCodeAction(action)
     })
-    this.addAction('codeActions', (mode, only) => {
-      return this.handler.getCurrentCodeActions(mode, only)
+    this.addAction('codeActions', async (mode, only) => {
+      codeActions = await this.handler.codeActions.getCurrentCodeActions(mode, only)
+      // save index for retreive
+      return codeActions.map((o, idx) => Object.assign({ index: idx }, o))
     })
-    this.addAction('quickfixes', mode => {
-      return this.handler.getCurrentCodeActions(mode, [CodeActionKind.QuickFix])
+    this.addAction('quickfixes', async mode => {
+      codeActions = await this.handler.codeActions.getCurrentCodeActions(mode, [CodeActionKind.QuickFix])
+      return codeActions.map((o, idx) => Object.assign({ index: idx }, o))
     })
     this.addAction('codeLensAction', () => {
-      return this.handler.doCodeLensAction()
+      return this.handler.codeLens.doAction()
     })
     this.addAction('runCommand', (...args: any[]) => {
       return this.handler.runCommand(...args)
     })
     this.addAction('doQuickfix', () => {
-      return this.handler.doQuickfix()
+      return this.handler.codeActions.doQuickfix()
     })
     this.addAction('refactor', () => {
-      return this.handler.doRefactor()
+      return this.handler.refactor.doRefactor()
     })
     this.addAction('repeatCommand', () => {
       return commandManager.repeatCommand()
@@ -386,7 +404,7 @@ export default class Plugin extends EventEmitter {
       return extensions.uninstallExtension(args)
     })
     this.addAction('getCurrentFunctionSymbol', () => {
-      return this.handler.getCurrentFunctionSymbol()
+      return this.handler.symbols.getCurrentFunctionSymbol()
     })
     this.addAction('getWordEdit', () => {
       return this.handler.getWordEdit()
@@ -403,7 +421,7 @@ export default class Plugin extends EventEmitter {
     this.addAction('selectCurrentPlaceholder', (triggerAutocmd?: boolean) => {
       return snippetManager.selectCurrentPlaceholder(!!triggerAutocmd)
     })
-    this.addAction('codeActionRange', (start, end, only) => this.handler.codeActionRange(start, end, only))
+    this.addAction('codeActionRange', (start, end, only) => this.handler.codeActions.codeActionRange(start, end, only))
     workspace.onDidChangeWorkspaceFolders(() => {
       nvim.setVar('WorkspaceFolders', workspace.folderPaths, true)
     })
@@ -422,20 +440,25 @@ export default class Plugin extends EventEmitter {
         window.showMessage('Failed to fetch semantic highlights', 'warning')
         return
       }
-
       if (!this.semanticChannel) {
         this.semanticChannel = window.createOutputChannel('semanticHighlightInfo')
       } else {
         this.semanticChannel.clear()
       }
       const channel = this.semanticChannel
-      channel.appendLine('## Semantic highlighting for the buffer\n')
-      channel.appendLine(`The number of semantic tokens: ${highlights.length}\n`)
+      channel.appendLine('## Semantic highlighting for current buffer\n')
+      channel.appendLine(`The number of semantic tokens: ${highlights.length}`)
       channel.appendLine('List of all semantic highlight groups:\n')
-
       const groups = [...new Set(highlights.map(({ group }) => group))]
       for (const group of groups) {
         channel.appendLine(`- ${group}`)
+      }
+
+      const doc = await workspace.document
+      const legend = languages.getLegend(doc.textDocument)
+      channel.appendLine('\n## type tokens that current Language Server supported:\n')
+      for (const t of legend.tokenTypes) {
+        channel.appendLine(`- CocSem_${t}`)
       }
 
       channel.show()
@@ -520,7 +543,11 @@ export default class Plugin extends EventEmitter {
   public async cocAction(method: string, ...args: any[]): Promise<any> {
     let fn = this.actions.get(method)
     if (!fn) throw new Error(`Action "${method}" not exists`)
-    return await Promise.resolve(fn.apply(null, args))
+    let ts = Date.now()
+    let res = await Promise.resolve(fn.apply(null, args))
+    let dt = Date.now() - ts
+    if (dt > 500) logger.warn(`Slow action "${method}" cost ${dt}ms`)
+    return res
   }
 
   public getHandler(): any {

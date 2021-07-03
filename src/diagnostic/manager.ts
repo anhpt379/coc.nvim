@@ -76,9 +76,8 @@ export class DiagnosticManager implements Disposable {
       fn.clear()
     }))
     events.on('InsertLeave', async bufnr => {
-      if (!this.config.refreshOnInsertMode) {
-        this.refreshBuffer(bufnr)
-      }
+      if (this.config.refreshOnInsertMode) return
+      this.refreshBuffer(bufnr)
     }, null, this.disposables)
     events.on('BufEnter', async () => {
       if (this.timer) clearTimeout(this.timer)
@@ -245,11 +244,9 @@ export class DiagnosticManager implements Disposable {
    * Show diagnostics under curosr in preview window
    */
   public async preview(): Promise<void> {
-    let [bufnr, cursor, atEnd] = await this.nvim.eval(`[bufnr("%"),coc#util#cursor(),col('.')==col('$')-1]`) as [number, [number, number], number]
-    let { nvim } = this
-    let diagnostics = this.getDiagnosticsAt(bufnr, cursor, atEnd == 1)
+    let diagnostics = await this.getCurrentDiagnostics()
     if (diagnostics.length == 0) {
-      nvim.command('pclose', true)
+      this.nvim.command('pclose', true)
       window.showMessage(`Empty diagnostics`, 'warning')
       return
     }
@@ -261,7 +258,7 @@ export class DiagnosticManager implements Disposable {
       lines.push(...message.split(/\r?\n/))
       lines.push('')
     }
-    nvim.call('coc#util#preview_info', [lines, 'txt'], true)
+    this.nvim.call('coc#util#preview_info', [lines, 'txt'], true)
   }
 
   /**
@@ -376,24 +373,33 @@ export class DiagnosticManager implements Disposable {
     return res
   }
 
-  private getDiagnosticsAt(bufnr: number, cursor: [number, number], atEnd = false): Diagnostic[] {
+  private getDiagnosticsAt(bufnr: number, cursor: [number, number], atEnd = false, lastline = false): Diagnostic[] {
     let buffer = this.buffers.getItem(bufnr)
     if (!buffer) return []
     let pos = Position.create(cursor[0], cursor[1])
     let res = buffer.getDiagnosticsAt(pos, this.config.checkCurrentLine)
-    if (!res.length && atEnd && !this.config.checkCurrentLine) {
-      return this.getDiagnosticsAt(bufnr, [cursor[0], cursor[1] + 1])
+    if (this.config.checkCurrentLine || res.length) return res
+    // check next character when cursor at end of line.
+    if (atEnd) {
+      pos = Position.create(cursor[0], cursor[1] + 1)
+      res = buffer.getDiagnosticsAt(pos, false)
+      if (res.length) return res
+    }
+    // check next line when cursor at the beginning of last line.
+    if (lastline && cursor[1] == 0) {
+      pos = Position.create(cursor[0] + 1, 0)
+      res = buffer.getDiagnosticsAt(pos, false)
     }
     return res
   }
 
   public async getCurrentDiagnostics(): Promise<Diagnostic[]> {
-    let [bufnr, cursor, atEnd] = await this.nvim.eval(`[bufnr("%"),coc#util#cursor(),col('.')==col('$')-1]`) as [number, [number, number], number]
-    return this.getDiagnosticsAt(bufnr, cursor, atEnd == 1)
+    let [bufnr, cursor, eol, lastline] = await this.nvim.eval(`[bufnr("%"),coc#util#cursor(),col('.')==col('$')-1,line('.')==line('$')]`) as [number, [number, number], number, number]
+    return this.getDiagnosticsAt(bufnr, cursor, eol == 1, lastline == 1)
   }
 
   /**
-   * Echo diagnostic message of currrent position
+   * Echo diagnostic message under cursor.
    */
   public async echoMessage(truncate = false): Promise<void> {
     const config = this.config
@@ -401,9 +407,9 @@ export class DiagnosticManager implements Disposable {
     if (this.timer) clearTimeout(this.timer)
     let useFloat = config.messageTarget == 'float'
     // echo
-    let [bufnr, cursor, filetype, mode, atEnd] = await this.nvim.eval(`[bufnr("%"),coc#util#cursor(),&filetype,mode(),col('.')==col('$')-1]`) as [number, [number, number], string, string, number]
+    let [filetype, mode] = await this.nvim.eval(`[&filetype,mode()]`) as [string, string]
     if (mode != 'n') return
-    let diagnostics = this.getDiagnosticsAt(bufnr, cursor, atEnd == 1)
+    let diagnostics = await this.getCurrentDiagnostics()
     if (diagnostics.length == 0) {
       if (useFloat) {
         this.floatFactory.close()
@@ -513,6 +519,7 @@ export class DiagnosticManager implements Disposable {
     this.config = {
       messageTarget,
       enableHighlightLineNumber,
+      autoRefresh: config.get<boolean>('autoRefresh', false),
       virtualTextSrcId: workspace.createNameSpace('diagnostic-virtualText'),
       checkCurrentLine: config.get<boolean>('checkCurrentLine', false),
       enableSign: workspace.env.sign && config.get<boolean>('enableSign', true),
@@ -583,7 +590,7 @@ export class DiagnosticManager implements Disposable {
    * Refresh diagnostics by uri or bufnr
    */
   public refreshBuffer(uri: string | number, force = false): boolean {
-    if (!this.enabled) return false
+    if (!this.enabled || !this.config.autoRefresh) return false
     let buf = this.buffers.getItem(uri)
     if (!buf) return false
     let diagnostics = this.getDiagnostics(buf.uri)
@@ -593,6 +600,21 @@ export class DiagnosticManager implements Disposable {
       buf.refresh(diagnostics)
     }
     return true
+  }
+
+  public refresh(bufnr?: number): void {
+    if (!bufnr) {
+      for (let item of this.buffers.items) {
+        let diagnostics = this.getDiagnostics(item.uri)
+        item.forceRefresh(diagnostics)
+      }
+    } else {
+      let item = this.buffers.getItem(bufnr)
+      if (item) {
+        let diagnostics = this.getDiagnostics(item.uri)
+        item.forceRefresh(diagnostics)
+      }
+    }
   }
 }
 
