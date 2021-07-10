@@ -1,5 +1,5 @@
 import { Neovim } from '@chemzqm/neovim'
-import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CancellationTokenSource, CodeAction, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, FoldingRange, FormattingOptions, Hover, InsertReplaceEdit, InsertTextFormat, LinkedEditingRanges, Location, LocationLink, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SemanticTokensLegend, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CancellationTokenSource, CodeAction, CodeActionContext, CodeActionKind, CodeLens, ColorInformation, ColorPresentation, CompletionItem, CompletionItemKind, CompletionList, CompletionTriggerKind, Disposable, DocumentHighlight, DocumentLink, DocumentSelector, DocumentSymbol, Emitter, Event, FoldingRange, FormattingOptions, Hover, InsertReplaceEdit, InsertTextFormat, LinkedEditingRanges, Location, LocationLink, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SemanticTokensLegend, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import commands from './commands'
 import diagnosticManager from './diagnostic/manager'
@@ -30,7 +30,8 @@ import SemanticTokensRangeManager from './provider/semanticTokensRangeManager'
 import LinkedEditingRangeManager from './provider/linkedEditingRangeManager'
 import snippetManager from './snippets/manager'
 import sources from './sources'
-import { CompleteOption, CompleteResult, CompletionContext, DiagnosticCollection, Documentation, DocumentSymbolProviderMetadata, ISource, ProviderName, SourceType, VimCompleteItem } from './types'
+import { CompleteOption, CompleteResult, ISource, SourceType, ExtendedCompleteItem } from './types'
+import DiagnosticCollection from './diagnostic/collection'
 import * as complete from './util/complete'
 import { getChangedFromEdits, rangeOverlap } from './util/position'
 import { byteIndex, byteLength, byteSlice } from './util/string'
@@ -55,7 +56,16 @@ interface CompleteConfig {
   floatEnable: boolean
 }
 
+export interface DocumentSymbolProviderMetadata {
+  /**
+   * A human-readable string that is shown when multiple outlines trees show for one document.
+   */
+  label?: string
+}
+
 class Languages {
+  private _onDidSemanticTokensRefresh = new Emitter<DocumentSelector>()
+  public readonly onDidSemanticTokensRefresh: Event<DocumentSelector> = this._onDidSemanticTokensRefresh.event
   private completeConfig: CompleteConfig
   private onTypeFormatManager = new OnTypeFormatManager()
   private documentLinkManager = new DocumentLinkManager()
@@ -273,10 +283,14 @@ class Languages {
   }
 
   public registerDocumentSemanticTokensProvider(selector: DocumentSelector, provider: DocumentSemanticTokensProvider, legend: SemanticTokensLegend): Disposable {
-    return this.semanticTokensManager.register(selector, provider, legend)
+    this._onDidSemanticTokensRefresh.fire(selector)
+    return this.semanticTokensManager.register(selector, provider, legend, () => {
+      this._onDidSemanticTokensRefresh.fire(selector)
+    })
   }
 
   public registerDocumentRangeSemanticTokensProvider(selector: DocumentSelector, provider: DocumentRangeSemanticTokensProvider, legend: SemanticTokensLegend): Disposable {
+    this._onDidSemanticTokensRefresh.fire(selector)
     return this.semanticTokensRangeManager.register(selector, provider, legend)
   }
 
@@ -433,7 +447,8 @@ class Languages {
     return this.callHierarchyManager.provideCallHierarchyOutgoingCalls(item, token)
   }
 
-  public getLegend(document: TextDocument): SemanticTokensLegend {
+  public getLegend(document: TextDocument, range?: boolean): SemanticTokensLegend | undefined {
+    if (range) return this.semanticTokensRangeManager.getLegend(document)
     return this.semanticTokensManager.getLegend(document)
   }
 
@@ -461,7 +476,7 @@ class Languages {
     return this.linkedEditingManager.provideLinkedEditingRanges(document, position, token)
   }
 
-  public hasProvider(id: ProviderName, document: TextDocument): boolean {
+  public hasProvider(id: string, document: TextDocument): boolean {
     switch (id) {
       case 'formatOnType':
         return this.onTypeFormatManager.hasProvider(document)
@@ -512,7 +527,7 @@ class Languages {
       case 'linkedEditing':
         return this.linkedEditingManager.hasProvider(document)
       default:
-        throw new Error(`${id} not supported.`)
+        throw new Error(`Invalid provider name: ${id}`)
     }
   }
 
@@ -565,7 +580,7 @@ class Languages {
         }
         if (token.isCancellationRequested) return null
         let position = complete.getPosition(opt)
-        let context: CompletionContext = { triggerKind, option: opt }
+        let context: any = { triggerKind, option: opt }
         if (isTrigger) context.triggerCharacter = triggerCharacter
         let result
         try {
@@ -588,7 +603,7 @@ class Languages {
           }
           option.col = startcol
         }
-        let items: VimCompleteItem[] = completeItems.map((o, index) => {
+        let items: ExtendedCompleteItem[] = completeItems.map((o, index) => {
           let item = this.convertVimCompleteItem(o, shortcut, option, prefix)
           item.index = index
           return item
@@ -599,7 +614,7 @@ class Languages {
           items
         }
       },
-      onCompleteResolve: async (item: VimCompleteItem, token: CancellationToken): Promise<void> => {
+      onCompleteResolve: async (item: ExtendedCompleteItem, token: CancellationToken): Promise<void> => {
         let { index } = item
         let resolving = completeItems[index]
         if (!resolving || resolvedIndexes.has(index)) return
@@ -624,7 +639,7 @@ class Languages {
         if (item.documentation == null) {
           let { documentation, detail } = resolving
           if (!documentation && !detail) return
-          let docs: Documentation[] = []
+          let docs = []
           if (detail && !item.detailShown && detail != item.word) {
             detail = detail.replace(/\n\s*/g, ' ')
             if (detail.length) {
@@ -648,7 +663,7 @@ class Languages {
           item.documentation = docs
         }
       },
-      onCompleteDone: async (vimItem: VimCompleteItem, opt: CompleteOption): Promise<void> => {
+      onCompleteDone: async (vimItem: ExtendedCompleteItem, opt: CompleteOption): Promise<void> => {
         let item = completeItems[vimItem.index]
         if (!item) return
         let line = opt.linenr - 1
@@ -682,7 +697,7 @@ class Languages {
           logger.error('Error on CompleteDone:', e)
         }
       },
-      shouldCommit: (item: VimCompleteItem, character: string): boolean => {
+      shouldCommit: (item: ExtendedCompleteItem, character: string): boolean => {
         let completeItem = completeItems[item.index]
         if (!completeItem) return false
         let commitCharacters = completeItem.commitCharacters || allCommitCharacters
@@ -776,13 +791,13 @@ class Languages {
     return byteIndex(line, character)
   }
 
-  private convertVimCompleteItem(item: CompletionItem, shortcut: string, opt: CompleteOption, prefix: string): VimCompleteItem {
+  private convertVimCompleteItem(item: CompletionItem, shortcut: string, opt: CompleteOption, prefix: string): ExtendedCompleteItem {
     let { echodocSupport, detailMaxLength, invalidInsertCharacters } = this.completeConfig
     let { detailField } = this
     let hasAdditionalEdit = item.additionalTextEdits && item.additionalTextEdits.length > 0
     let isSnippet = item.insertTextFormat === InsertTextFormat.Snippet || hasAdditionalEdit
     let label = item.label.trim()
-    let obj: VimCompleteItem = {
+    let obj: ExtendedCompleteItem = {
       word: complete.getWord(item, opt, invalidInsertCharacters),
       abbr: label,
       menu: `[${shortcut}]`,

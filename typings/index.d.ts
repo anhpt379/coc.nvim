@@ -1822,6 +1822,20 @@ declare module 'coc.nvim' {
   }
 
   /**
+   * @since 3.16.0
+   */
+  export interface SemanticTokensLegend {
+    /**
+     * The token types a server uses.
+     */
+    tokenTypes: string[]
+    /**
+     * The token modifiers a server uses.
+     */
+    tokenModifiers: string[]
+  }
+
+  /**
   * @since 3.16.0
   */
   export interface SemanticTokens {
@@ -3054,11 +3068,14 @@ declare module 'coc.nvim' {
     | null
     | Thenable<T | undefined | null>
 
+  /**
+   * Supported provider names.
+   */
   export type ProviderName = 'rename' | 'onTypeEdit' | 'documentLink' | 'documentColor'
-    | 'foldingRange' | 'format' | 'codeAction' | 'workspaceSymbols' | 'formatRange'
+    | 'foldingRange' | 'format' | 'codeAction' | 'workspaceSymbols' | 'formatRange' | 'formatOnType'
     | 'hover' | 'signature' | 'documentSymbol' | 'documentHighlight' | 'definition'
     | 'declaration' | 'typeDefinition' | 'reference' | 'implementation'
-    | 'codeLens' | 'selectionRange'
+    | 'codeLens' | 'selectionRange' | 'callHierarchy' | 'semanticTokens' | 'linkedEditing'
 
   /**
    * The completion item provider interface defines the contract between extensions and
@@ -4421,6 +4438,13 @@ declare module 'coc.nvim' {
   // }}
 
   // languages module {{
+  export interface DocumentSymbolProviderMetadata {
+    /**
+    * A human-readable string that is shown when multiple outlines trees show for one document.
+    */
+    label?: string
+  }
+
   export namespace languages {
     /**
      * Create a diagnostics collection.
@@ -4533,9 +4557,10 @@ declare module 'coc.nvim' {
      *
      * @param selector A selector that defines the documents this provider is applicable to.
      * @param provider A document symbol provider.
+     * @param metadata Optional meta data.
      * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
      */
-    export function registerDocumentSymbolProvider(selector: DocumentSelector, provider: DocumentSymbolProvider): Disposable
+    export function registerDocumentSymbolProvider(selector: DocumentSelector, provider: DocumentSymbolProvider, metadata?: DocumentSymbolProviderMetadata): Disposable
 
     /**
      * Register a folding range provider.
@@ -4674,7 +4699,7 @@ declare module 'coc.nvim' {
      * Register a rename provider.
      *
      * Multiple providers can be registered for a language. In that case providers are sorted
-     * by their [score](#languages.match) and asked in sequence. The first provider producing a result
+     * by their [score](#workspace.match) and asked in sequence. The first provider producing a result
      * defines the result of the whole operation.
      *
      * @param selector A selector that defines the documents this provider is applicable to.
@@ -4724,6 +4749,60 @@ declare module 'coc.nvim' {
      * @return A [disposable](#Disposable) that unregisters this provider when being disposed.
      */
     export function registerDocumentRangeFormatProvider(selector: DocumentSelector, provider: DocumentRangeFormattingEditProvider, priority?: number): Disposable
+
+    /**
+     * Register a call hierarchy provider.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider A call hierarchy provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerCallHierarchyProvider(selector: DocumentSelector, provider: CallHierarchyProvider): Disposable
+
+    /**
+     * Register a semantic tokens provider for a whole document.
+     *
+     * Multiple providers can be registered for a language. In that case providers are sorted
+     * by their {@link languages.match score} and the best-matching provider is used. Failure
+     * of the selected provider will cause a failure of the whole operation.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider A document semantic tokens provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerDocumentSemanticTokensProvider(selector: DocumentSelector, provider: DocumentSemanticTokensProvider, legend: SemanticTokensLegend): Disposable
+
+    /**
+     * Register a semantic tokens provider for a document range.
+     *
+     * *Note:* If a document has both a `DocumentSemanticTokensProvider` and a `DocumentRangeSemanticTokensProvider`,
+     * the range provider will be invoked only initially, for the time in which the full document provider takes
+     * to resolve the first request. Once the full document provider resolves the first request, the semantic tokens
+     * provided via the range provider will be discarded and from that point forward, only the document provider
+     * will be used.
+     *
+     * Multiple providers can be registered for a language. In that case providers are sorted
+     * by their {@link languages.match score} and the best-matching provider is used. Failure
+     * of the selected provider will cause a failure of the whole operation.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider A document range semantic tokens provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerDocumentRangeSemanticTokensProvider(selector: DocumentSelector, provider: DocumentRangeSemanticTokensProvider, legend: SemanticTokensLegend): Disposable
+
+    /**
+     * Register a linked editing range provider.
+     *
+     * Multiple providers can be registered for a language. In that case providers are sorted
+     * by their {@link languages.match score} and the best-matching provider that has a result is used. Failure
+     * of the selected provider will cause a failure of the whole operation.
+     *
+     * @param selector A selector that defines the documents this provider is applicable to.
+     * @param provider A linked editing range provider.
+     * @return A {@link Disposable} that unregisters this provider when being disposed.
+     */
+    export function registerLinkedEditingRangeProvider(selector: DocumentSelector, provider: LinkedEditingRangeProvider): Disposable
   }
   // }}
 
@@ -7327,6 +7406,88 @@ declare module 'coc.nvim' {
     ) => ProviderResult<FoldingRange[]>
   }
 
+  export interface PrepareCallHierarchySignature {
+    (this: void, document: TextDocument, position: Position, token: CancellationToken): ProviderResult<CallHierarchyItem | CallHierarchyItem[]>
+  }
+
+  export interface CallHierarchyIncomingCallsSignature {
+    (this: void, item: CallHierarchyItem, token: CancellationToken): ProviderResult<CallHierarchyIncomingCall[]>
+  }
+
+  export interface CallHierarchyOutgoingCallsSignature {
+    (this: void, item: CallHierarchyItem, token: CancellationToken): ProviderResult<CallHierarchyOutgoingCall[]>
+  }
+  export interface CallHierarchyMiddleware {
+    prepareCallHierarchy?: (
+      this: void,
+      document: TextDocument,
+      positions: Position,
+      token: CancellationToken,
+      next: PrepareCallHierarchySignature
+    ) => ProviderResult<CallHierarchyItem | CallHierarchyItem[]>
+    provideCallHierarchyIncomingCalls?: (
+      this: void,
+      item: CallHierarchyItem,
+      token: CancellationToken,
+      next: CallHierarchyIncomingCallsSignature
+    ) => ProviderResult<CallHierarchyIncomingCall[]>
+    provideCallHierarchyOutgoingCalls?: (
+      this: void,
+      item: CallHierarchyItem,
+      token: CancellationToken,
+      next: CallHierarchyOutgoingCallsSignature
+    ) => ProviderResult<CallHierarchyOutgoingCall[]>
+  }
+
+  export interface DocumentSemanticsTokensSignature {
+    (this: void, document: TextDocument, token: CancellationToken): ProviderResult<SemanticTokens>
+  }
+
+  export interface DocumentSemanticsTokensEditsSignature {
+    (this: void, document: TextDocument, previousResultId: string, token: CancellationToken): ProviderResult<SemanticTokens | SemanticTokensDelta>
+  }
+
+  export interface DocumentRangeSemanticTokensSignature {
+    (this: void, document: TextDocument, range: Range, token: CancellationToken): ProviderResult<SemanticTokens>
+  }
+
+  export interface SemanticTokensMiddleware {
+    provideDocumentSemanticTokens?: (
+      this: void,
+      document: TextDocument,
+      token: CancellationToken,
+      next: DocumentSemanticsTokensSignature
+    ) => ProviderResult<SemanticTokens>
+    provideDocumentSemanticTokensEdits?: (
+      this: void,
+      document: TextDocument,
+      previousResultId: string,
+      token: CancellationToken,
+      next: DocumentSemanticsTokensEditsSignature
+    ) => ProviderResult<SemanticTokens | SemanticTokensDelta>
+    provideDocumentRangeSemanticTokens?: (
+      this: void,
+      document: TextDocument,
+      range: Range,
+      token: CancellationToken,
+      next: DocumentRangeSemanticTokensSignature
+    ) => ProviderResult<SemanticTokens>
+  }
+
+  export interface ProvideLinkedEditingRangeSignature {
+    (this: void, document: TextDocument, position: Position, token: CancellationToken): ProviderResult<LinkedEditingRanges>
+  }
+
+  export interface LinkedEditingRangeMiddleware {
+    provideLinkedEditingRange?: (
+      this: void,
+      document: TextDocument,
+      position: Position,
+      token: CancellationToken,
+      next: ProvideLinkedEditingRangeSignature
+    ) => ProviderResult<LinkedEditingRanges>
+  }
+
   export interface ProvideSelectionRangeSignature {
     (this: void, document: TextDocument, positions: Position[], token: CancellationToken): ProviderResult<SelectionRange[]>
   }
@@ -7450,6 +7611,59 @@ declare module 'coc.nvim' {
   }
 
   export type WorkspaceMiddleware = _WorkspaceMiddleware & ConfigurationWorkspaceMiddleware & WorkspaceFolderWorkspaceMiddleware
+
+  /**
+   * Params to show a document.
+   *
+   * @since 3.16.0
+   */
+  export interface ShowDocumentParams {
+    /**
+       * The document uri to show.
+    */
+    uri: string
+    /**
+       * Indicates to show the resource in an external program.
+       * To show for example `https://code.visualstudio.com/`
+       * in the default WEB browser set `external` to `true`.
+    */
+    external?: boolean
+    /**
+       * An optional property to indicate whether the editor
+       * showing the document should take focus or not.
+       * Clients might ignore this property if an external
+       * program in started.
+    */
+    takeFocus?: boolean
+    /**
+       * An optional selection range if the document is a text
+       * document. Clients might ignore the property if an
+       * external program is started or the file is not a text
+       * file.
+    */
+    selection?: Range
+  }
+  /**
+   * The result of an show document request.
+   *
+   * @since 3.16.0
+   */
+  export interface ShowDocumentResult {
+    /**
+     * A boolean indicating if the show was successful.
+    */
+    success: boolean
+  }
+
+  export interface _WindowMiddleware {
+    showDocument?: (
+      this: void,
+      params: ShowDocumentParams,
+      next: RequestHandler<ShowDocumentParams, ShowDocumentResult, void>
+    ) => Promise<ShowDocumentResult>
+  }
+  export type WindowMiddleware = _WindowMiddleware
+
   /**
    * The Middleware lets extensions intercept the request and notications send and received
    * from the server
@@ -7490,20 +7704,26 @@ declare module 'coc.nvim' {
     resolveDocumentLink?: (this: void, link: DocumentLink, token: CancellationToken, next: ResolveDocumentLinkSignature) => ProviderResult<DocumentLink>
     executeCommand?: (this: void, command: string, args: any[], next: ExecuteCommandSignature) => ProviderResult<any>
     workspace?: WorkspaceMiddleware
+    window?: WindowMiddleware
   }
-  export type Middleware = _Middleware & TypeDefinitionMiddleware & ImplementationMiddleware & ColorProviderMiddleware & DeclarationMiddleware & FoldingRangeProviderMiddleware & SelectionRangeProviderMiddleware
+  export type Middleware = _Middleware & TypeDefinitionMiddleware & ImplementationMiddleware & ColorProviderMiddleware & DeclarationMiddleware & FoldingRangeProviderMiddleware & CallHierarchyMiddleware & SemanticTokensMiddleware & LinkedEditingRangeMiddleware & SelectionRangeProviderMiddleware
+
+  export interface ConnectionOptions {
+    // cancellationStrategy: CancellationStrategy
+    maxRestartCount?: number
+  }
 
   export interface LanguageClientOptions {
     ignoredRootPaths?: string[]
-    documentSelector?: DocumentSelector | string[]
-    synchronize?: SynchronizeOptions
-    diagnosticCollectionName?: string
-    disableDynamicRegister?: boolean
     disableWorkspaceFolders?: boolean
     disableSnippetCompletion?: boolean
+    disableDynamicRegister?: boolean
     disableDiagnostics?: boolean
     disableCompletion?: boolean
     formatterPriority?: number
+    documentSelector?: DocumentSelector | string[]
+    synchronize?: SynchronizeOptions
+    diagnosticCollectionName?: string
     outputChannelName?: string
     outputChannel?: OutputChannel
     revealOutputChannelOn?: RevealOutputChannelOn
@@ -7518,6 +7738,10 @@ declare module 'coc.nvim' {
     errorHandler?: ErrorHandler
     middleware?: Middleware
     workspaceFolder?: WorkspaceFolder
+    connectionOptions?: ConnectionOptions
+    markdown: {
+      isTrusted: boolean
+    }
   }
   export enum State {
     Stopped = 1,
@@ -7574,65 +7798,83 @@ declare module 'coc.nvim' {
      */
     dispose(): void
   }
+
+  class ParameterStructures {
+    private readonly kind
+    /**
+     * The parameter structure is automatically inferred on the number of parameters
+     * and the parameter type in case of a single param.
+    */
+    static readonly auto: ParameterStructures
+    /**
+     * Forces `byPosition` parameter structure. This is useful if you have a single
+     * parameter which has a literal type.
+    */
+    static readonly byPosition: ParameterStructures
+    /**
+     * Forces `byName` parameter structure. This is only useful when having a single
+     * parameter. The library will report errors if used with a different number of
+     * parameters.
+    */
+    static readonly byName: ParameterStructures
+    private constructor()
+    static is(value: any): value is ParameterStructures
+    toString(): string
+  }
   /**
    * An interface to type messages.
    */
-  export interface RPCMessageType {
+  export interface MessageSignature {
     readonly method: string
     readonly numberOfParams: number
+    readonly parameterStructures: ParameterStructures
   }
 
   /**
    *
    * An abstract implementation of a MessageType.
    */
-  abstract class AbstractMessageType implements RPCMessageType {
-    get method(): string
-    get numberOfParams(): number
-    constructor(_method: string, _numberOfParams: number)
+  abstract class AbstractMessageSignature implements MessageSignature {
+    readonly method: string
+    readonly numberOfParams: number
+    constructor(method: string, numberOfParams: number)
+    get parameterStructures(): ParameterStructures
   }
 
   /**
    * Classes to type request response pairs
-   *
-   * The type parameter RO will be removed in the next major version
-   * of the JSON RPC library since it is a LSP concept and doesn't
-   * belong here. For now it is tagged as default never.
    */
-  export class RequestType0<R, E, RO = never> extends AbstractMessageType {
+  export class RequestType0<R, E> extends AbstractMessageSignature {
     /**
      * Clients must not use this property. It is here to ensure correct typing.
      */
-    readonly _?: [R, E, RO, _EM]
+    readonly _: [R, E, _EM] | undefined
     constructor(method: string)
   }
 
-  export class RequestType<P, R, E, RO = never> extends AbstractMessageType {
+  export class RequestType<P, R, E> extends AbstractMessageSignature {
+    private _parameterStructures
     /**
      * Clients must not use this property. It is here to ensure correct typing.
      */
-    readonly _?: [P, R, E, RO, _EM]
+    readonly _: [P, R, E, _EM] | undefined
+    constructor(method: string, _parameterStructures?: ParameterStructures)
+    get parameterStructures(): ParameterStructures
+  }
+
+  export class NotificationType<P> extends AbstractMessageSignature {
+    /**
+     * Clients must not use this property. It is here to ensure correct typing.
+     */
+    readonly _: [P, _EM] | undefined
     constructor(method: string)
   }
 
-  /**
-   * The type parameter RO will be removed in the next major version
-   * of the JSON RPC library since it is a LSP concept and doesn't
-   * belong here. For now it is tagged as default never.
-   */
-  export class NotificationType<P, RO = never> extends AbstractMessageType {
+  export class NotificationType0 extends AbstractMessageSignature {
     /**
      * Clients must not use this property. It is here to ensure correct typing.
      */
-    readonly _?: [P, RO, _EM]
-    constructor(method: string)
-  }
-
-  export class NotificationType0<RO = never> extends AbstractMessageType {
-    /**
-     * Clients must not use this property. It is here to ensure correct typing.
-     */
-    readonly _?: [RO, _EM]
+    readonly _: [_EM] | undefined
     constructor(method: string)
   }
 
@@ -7689,6 +7931,14 @@ declare module 'coc.nvim' {
      */
     workDoneToken?: ProgressToken
   }
+  class RegistrationType<RO> {
+    /**
+     * Clients must not use this property. It is here to ensure correct typing.
+     */
+    readonly ____: [RO, _EM] | undefined
+    readonly method: string
+    constructor(method: string)
+  }
   /**
    * The result returned from an initialize request.
    */
@@ -7718,11 +7968,7 @@ declare module 'coc.nvim' {
     [custom: string]: any
   }
 
-  export interface DynamicFeature<T> {
-    /**
-     * The message for which this features support dynamic activation / registration.
-     */
-    messages: RPCMessageType | RPCMessageType[]
+  export interface DynamicFeature<RO> {
     /**
      * Called to fill the initialize params.
      *
@@ -7742,17 +7988,20 @@ declare module 'coc.nvim' {
      * to the server.
      *
      * @param capabilities the server capabilities.
-     * @param documentSelector the document selector pass to the client's constuctor.
+     * @param documentSelector the document selector pass to the client's constructor.
      *  May be `undefined` if the client was created without a selector.
      */
     initialize(capabilities: any, documentSelector: DocumentSelector | undefined): void
     /**
+      * The signature (e.g. method) for which this features support dynamic activation / registration.
+      */
+    registrationType: RegistrationType<RO>
+    /**
      * Is called when the server send a register request for the given message.
      *
-     * @param message the message to register for.
      * @param data additional registration data as defined in the protocol.
      */
-    register(message: RPCMessageType, data: RegistrationData<T>): void
+    register(data: RegistrationData<RO>): void
     /**
      * Is called when the server wants to unregister a feature.
      *
@@ -7847,10 +8096,25 @@ declare module 'coc.nvim' {
     dispose(): void
   }
 
+  export class NullLogger {
+    constructor()
+    error(message: string): void
+    warn(message: string): void
+    info(message: string): void
+    log(message: string): void
+  }
+
   export interface MessageTransports {
     reader: MessageReader
     writer: MessageWriter
     detached?: boolean
+  }
+
+  export namespace MessageTransports {
+    /**
+    * Checks whether the given value conforms to the [MessageTransports](#MessageTransports) interface.
+    */
+    function is(value: any): value is MessageTransports
   }
 
   export type ServerOptions = Executable | NodeModule | {
@@ -7898,25 +8162,29 @@ declare module 'coc.nvim' {
      * R => result
      * E => Error result
      */
-    sendRequest<R, E, RO>(type: RequestType0<R, E, RO>, token?: CancellationToken): Promise<R>
+    sendRequest<R, E>(type: RequestType0<R, E>, token?: CancellationToken): Promise<R>
     /**
      * P => params
      * R => result
      * E => Error result
      */
-    sendRequest<P, R, E, RO>(type: RequestType<P, R, E, RO>, params: P, token?: CancellationToken): Promise<R>
+    sendRequest<P, R, E>(type: RequestType<P, R, E>, params: P, token?: CancellationToken): Promise<R>
     sendRequest<R>(method: string, token?: CancellationToken): Promise<R>
     sendRequest<R>(method: string, param: any, token?: CancellationToken): Promise<R>
-    onRequest<R, E, RO>(type: RequestType0<R, E, RO>, handler: RequestHandler0<R, E>): void
-    onRequest<P, R, E, RO>(type: RequestType<P, R, E, RO>, handler: RequestHandler<P, R, E>): void
-    onRequest<R, E>(method: string, handler: (...params: any[]) => HandlerResult<R, E>): void
-    sendNotification<RO>(type: NotificationType0<RO>): void
-    sendNotification<P, RO>(type: NotificationType<P, RO>, params?: P): void
+
+    onRequest<R, E>(type: RequestType0<R, E>, handler: RequestHandler0<R, E>): Disposable
+    onRequest<P, R, E>(type: RequestType<P, R, E>, handler: RequestHandler<P, R, E>): Disposable
+    onRequest<R, E>(method: string, handler: (...params: any[]) => HandlerResult<R, E>): Disposable
+
+    sendNotification(type: NotificationType0): void
+    sendNotification<P>(type: NotificationType<P>, params?: P): void
     sendNotification(method: string): void
     sendNotification(method: string, params: any): void
-    onNotification<RO>(type: NotificationType0<RO>, handler: () => void): void
-    onNotification<P, RO>(type: NotificationType<P, RO>, handler: (params: P) => void): void
-    onNotification(method: string, handler: (...params: any[]) => void): void
+
+    onNotification(type: NotificationType0, handler: () => void): Disposable
+    onNotification<P>(type: NotificationType<P>, handler: (params: P) => void): Disposable
+    onNotification(method: string, handler: (...params: any[]) => void): Disposable
+
     onProgress<P>(type: ProgressType<any>, token: string | number, handler: (params: P) => void): Disposable
     sendProgress<P>(type: ProgressType<P>, token: string | number, value: P): void
 
@@ -7981,7 +8249,7 @@ declare module 'coc.nvim' {
     /**
      * Log failed request to outputChannel.
      */
-    logFailedRequest(type: RPCMessageType, error: any): void
+    handleFailedRequest<T>(type: MessageSignature, token: CancellationToken | undefined, error: any, defaultValue: T)
   }
 
   /**

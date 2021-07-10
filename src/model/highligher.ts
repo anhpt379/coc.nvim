@@ -1,14 +1,11 @@
 import { Buffer } from '@chemzqm/neovim'
 import { parseAnsiHighlights } from '../util/ansiparse'
 import { byteLength } from '../util/string'
+import { HighlightItem } from '../types'
 
-export interface HighlightItem {
-  // all zero indexed
-  line: number
-  colStart: number
-  // default to -1
-  colEnd?: number
-  hlGroup: string
+export interface TextItem {
+  text: string
+  hlGroup?: string
 }
 
 /**
@@ -17,9 +14,6 @@ export interface HighlightItem {
 export default class Highlighter {
   private lines: string[] = []
   private highlights: HighlightItem[] = []
-
-  constructor(private srcId = -1) {
-  }
 
   public addLine(line: string, hlGroup?: string): void {
     if (line.includes('\n')) {
@@ -30,7 +24,7 @@ export default class Highlighter {
     }
     if (hlGroup) {
       this.highlights.push({
-        line: this.lines.length,
+        lnum: this.lines.length,
         colStart: line.match(/^\s*/)[0].length,
         colEnd: byteLength(line),
         hlGroup
@@ -42,7 +36,7 @@ export default class Highlighter {
         let { span, hlGroup } = hl
         if (span[0] != span[1]) {
           this.highlights.push({
-            line: this.lines.length,
+            lnum: this.lines.length,
             colStart: span[0],
             colEnd: span[1],
             hlGroup
@@ -59,13 +53,23 @@ export default class Highlighter {
     this.lines.push(...lines)
   }
 
+  /**
+   * Add texts to new Lines
+   */
+  public addTexts(items: TextItem[]): void {
+    this.addLines('')
+    for (let item of items) {
+      this.addText(item.text, item.hlGroup)
+    }
+  }
+
   public addText(text: string, hlGroup?: string): void {
     let { lines } = this
     let pre = lines[lines.length - 1] || ''
     if (hlGroup) {
       let colStart = byteLength(pre)
       this.highlights.push({
-        line: lines.length ? lines.length - 1 : 0,
+        lnum: lines.length ? lines.length - 1 : 0,
         colStart,
         colEnd: colStart + byteLength(text),
         hlGroup
@@ -91,13 +95,14 @@ export default class Highlighter {
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
     buffer.setLines(this.lines, { start, end, strictIndexing: false }, true)
     for (let item of this.highlights) {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
       buffer.addHighlight({
         hlGroup: item.hlGroup,
         colStart: item.colStart,
         colEnd: item.colEnd == null ? -1 : item.colEnd,
-        line: start + item.line,
-        srcId: this.srcId
-      }).logError()
+        line: start + item.lnum,
+        srcId: -1
+      })
     }
   }
 }

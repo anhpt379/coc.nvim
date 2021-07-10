@@ -1,13 +1,15 @@
 import { Buffer, Neovim } from '@chemzqm/neovim'
 import debounce from 'debounce'
 import { Diagnostic, DiagnosticSeverity, DiagnosticTag, Position, Range } from 'vscode-languageserver-protocol'
-import { BufferSyncItem, DiagnosticConfig, LocationListItem } from '../types'
+import { BufferSyncItem, HighlightItem, LocationListItem } from '../types'
 import { equals } from '../util/object'
 import { lineInRange, positionInRange } from '../util/position'
+import workspace from '../workspace'
 import { getLocationListItem, getNameFromSeverity, getSeverityType } from './util'
 const isVim = process.env.VIM_NODE_RPC == '1'
 const logger = require('../util/logger')('diagnostic-buffer')
 const signGroup = 'CocDiagnostic'
+const highlightNamespace = 'diagnostic'
 
 export enum DiagnosticState {
   Enabled,
@@ -21,6 +23,38 @@ export enum DiagnosticHighlight {
   Hint = 'CocHintHighlight',
   Deprecated = 'CocDeprecatedHighlight',
   Unused = 'CocUnusedHighlight'
+}
+
+export interface DiagnosticConfig {
+  highlighLimit: number
+  autoRefresh: boolean
+  enableSign: boolean
+  locationlistUpdate: boolean
+  enableHighlightLineNumber: boolean
+  checkCurrentLine: boolean
+  enableMessage: string
+  displayByAle: boolean
+  signPriority: number
+  errorSign: string
+  warningSign: string
+  infoSign: string
+  hintSign: string
+  level: number
+  messageTarget: string
+  messageDelay: number
+  maxWindowHeight: number
+  maxWindowWidth: number
+  refreshOnInsertMode: boolean
+  virtualText: boolean
+  virtualTextCurrentLineOnly: boolean
+  virtualTextSrcId: number
+  virtualTextPrefix: string
+  virtualTextLines: number
+  virtualTextLineSeparator: string
+  filetypeMap: object
+  showUnused?: boolean
+  showDeprecated?: boolean
+  format?: string
 }
 
 const ErrorSymbol = Symbol('CocError')
@@ -54,7 +88,7 @@ export class DiagnosticBuffer implements BufferSyncItem {
   ) {
     this.refresh = debounce((diagnostics: ReadonlyArray<Diagnostic & { collection: string }>) => {
       this._refresh(diagnostics).logError()
-    }, 300)
+    }, 500)
   }
 
   private get displayByAle(): boolean {
@@ -121,7 +155,6 @@ export class DiagnosticBuffer implements BufferSyncItem {
   }
 
   private async _refresh(diagnostics: ReadonlyArray<Diagnostic & { collection: string }>): Promise<void> {
-    if (equals(this.diagnostics, diagnostics)) return
     let { refreshOnInsertMode } = this.config
     let { nvim } = this
     if (this._state == DiagnosticState.Disabled) return
@@ -132,12 +165,17 @@ export class DiagnosticBuffer implements BufferSyncItem {
     if (this.displayByAle) {
       this.refreshAle(diagnostics)
     } else {
-      this.diagnostics = diagnostics
       let lnum = arr[2]
+      if (equals(this.diagnostics, diagnostics)) {
+        this.updateHighlights(diagnostics)
+        this.showVirtualText(diagnostics, lnum)
+        return
+      }
+      this.diagnostics = diagnostics
       nvim.pauseNotification()
       this.setDiagnosticInfo(diagnostics)
       this.addSigns(diagnostics)
-      this.addHighlight(diagnostics)
+      this.updateHighlights(diagnostics)
       this.updateLocationList(arr[3], diagnostics)
       this.showVirtualText(diagnostics, lnum)
       if (isVim) this.nvim.command('redraw', true)
@@ -233,25 +271,31 @@ export class DiagnosticBuffer implements BufferSyncItem {
     }
   }
 
-  public addHighlight(diagnostics: ReadonlyArray<Diagnostic>): void {
-    this.clearHighlight()
-    if (diagnostics.length == 0) return
-    const highlights: Map<DiagnosticHighlight, Range[]> = new Map()
-    for (let diagnostic of diagnostics) {
+  public updateHighlights(diagnostics: ReadonlyArray<Diagnostic>): void {
+    let items = this.getHighlightItems(diagnostics)
+    this.nvim.call('coc#highlight#update_highlights', [this.bufnr, highlightNamespace, items], true)
+  }
+
+  private getHighlightItems(diagnostics: ReadonlyArray<Diagnostic>): HighlightItem[] {
+    let doc = workspace.getDocument(this.bufnr)
+    if (!doc) return []
+    let res: HighlightItem[] = []
+    for (let diagnostic of diagnostics.slice(0, this.config.highlighLimit)) {
       let { range } = diagnostic
-      let hi = getHighlightGroup(diagnostic)
-      let ranges = highlights.get(hi) || []
-      ranges.push(range)
-      highlights.set(hi, ranges)
+      if (!range) continue
+      let hlGroup = getHighlightGroup(diagnostic)
+      doc.addHighlights(res, hlGroup, range)
     }
-    for (let hlGroup of highlights.keys()) {
-      let ranges = highlights.get(hlGroup) || []
-      if (ranges.length) this.buffer.highlightRanges('diagnostic', hlGroup, ranges)
-    }
+    // needed for iteration performance and since diagnostic highlight may cross lines.
+    res.sort((a, b) => {
+      if (a.lnum != b.lnum) return a.lnum - b.lnum
+      return a.colStart - b.colStart
+    })
+    return res
   }
 
   private clearHighlight(): void {
-    this.buffer.clearNamespace('diagnostic')
+    this.buffer.clearNamespace(highlightNamespace)
   }
 
   public get buffer(): Buffer {

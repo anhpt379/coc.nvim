@@ -354,6 +354,13 @@ Built-in configurations:~
 
 	Display diagnostics, default: `true`
 
+"diagnostic.highlighLimit":~
+
+	Limit count for highlighted diagnostics, too many diagnostic
+	highlights could make vim stop responsing.
+
+	default: `1000`
+
 "diagnostic.autoRefresh":~
 
 	Enable automatically refresh diagnostics, use
@@ -1349,6 +1356,13 @@ g:coc_disable_uncaught_error 				 *g:coc_disable_uncaught_error*
 
 	Default: 0
 
+g:coc_text_prop_offset 					 *g:coc_text_prop_offset*
+
+	Start |textprop| id offset of highlight namespaces on vim, change to
+	other value to avoid conflict.
+
+	Default: 1000
+
 g:coc_channel_timeout					*g:coc_channel_timeout*
 
 	Channel timeout in seconds for request to node client.
@@ -1526,12 +1540,12 @@ g:WorkspaceFolders					*g:WorkspaceFolders*
 g:node_client_debug					*g:node_client_debug*
 
 	Enable debug mode of node client for check rpc messages between vim
-	and coc.nvim, use command: >
+	and coc.nvim.  Use environment variable $NODE_CLIENT_LOG_FILE to set
+	the log file or get the log file after coc.nvim started.
+	To open the log file, use command: >
 
 	:call coc#client#open_log()
 <
-	to open the log file.
-
 	Default: `0`
 
 g:coc_config_home					*g:coc_config_home*
@@ -1595,6 +1609,10 @@ g:coc_install_yarn_cmd 					*g:coc_install_yarn_cmd*
 
 Some variables are provided by coc.nvim so you can use them in your
 statusline. See |coc-status| for detail.
+
+g:coc_service_initialized 			 *g:coc_service_initialized*
+
+	Is `1` when coc.nvim initialized, used with autocmd |CocNvimInit|.
 
 b:coc_diagnostic_info					*b:coc_diagnostic_info*
 
@@ -2233,10 +2251,13 @@ Acceptable {action} names for |CocAction()| and |CocActionAsync|.
 	Get workspaceEdit of current word, language server used when possible,
 	extract word from current buffer as fallback.
 
-"getWorkspaceSymbols" {input} [{bufnr}]		*coc-action-getWorkspaceSymbols*
+"getWorkspaceSymbols" {input}			*coc-action-getWorkspaceSymbols*
 
-	Get workspace symbols from {input} and optional {bufnr} (use current
-	bufnr when empty).
+	Get workspace symbols from {input}.
+
+"resolveWorkspaceSymbol" {symbol} 		 *coc-action-resolveWorkspaceSymbol*
+
+	Resolve location for workspace {symbol}.
 
 "diagnosticToggleBuffer" [{bufnr}]		 *coc-action-diagnosticToggleBuffer*
 
@@ -2252,6 +2273,16 @@ Acceptable {action} names for |CocAction()| and |CocActionAsync|.
 	when {bufnr} not exists, returns `v:null` before diagnostics are shown.
 
 	Useful when `diagnostic.autoRefresh` is `false`.
+
+"incomingCalls" [{CallHierarchyItem}] 		*coc-action-incomingCalls*
+
+	Retrieve incoming calls from {CallHierarchyItem} or current position
+	when not provided.
+
+"outgoingCalls" [{CallHierarchyItem}] 		*coc-action-outgoingCalls*
+
+	Retrieve outgoing calls from {CallHierarchyItem} or current position
+	when not provided.
 
 ------------------------------------------------------------------------------
 COMMANDS						*coc-commands*
@@ -2744,6 +2775,38 @@ CocListPath						*CocListPath*
   Default: `hi default link CocListPath Comment`
 
   Used for current cwd in statusline of CocList.
+
+CocSem_*						*CocSem*
+
+  Used for words whose semantics are provided by the language server, which
+  typically analyzes source code more deeply than vim's builtin syntax parser.
+
+  Basic defaults are provided for the "standard" token kinds, but any kind
+  supported by the server can be highlighted by creating the highlight group.
+
+  Default (disable by setting `g:coc_default_semantic_highlight_groups = 0`):
+  `hi default link CocSem_namespace Identifier`
+  `hi default link CocSem_type Type`
+  `hi default link CocSem_class Structure`
+  `hi default link CocSem_enum Type`
+  `hi default link CocSem_interface Type`
+  `hi default link CocSem_struct Structure`
+  `hi default link CocSem_typeParameter Type`
+  `hi default link CocSem_parameter Identifier`
+  `hi default link CocSem_variable Identifier`
+  `hi default link CocSem_property Identifier`
+  `hi default link CocSem_enumMember Constant`
+  `hi default link CocSem_event Identifier`
+  `hi default link CocSem_function Function`
+  `hi default link CocSem_method Function`
+  `hi default link CocSem_macro Macro`
+  `hi default link CocSem_keyword Keyword`
+  `hi default link CocSem_modifier StorageClass`
+  `hi default link CocSem_comment Comment`
+  `hi default link CocSem_string String`
+  `hi default link CocSem_number Number`
+  `hi default link CocSem_regexp Normal`
+  `hi default link CocSem_operator Operator`
 
 ==============================================================================
 LIST SUPPORT						*coc-list*

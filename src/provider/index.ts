@@ -1,4 +1,4 @@
-import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CodeAction, CodeActionContext, CodeActionKind, CodeLens, Color, ColorInformation, ColorPresentation, Command, CompletionContext, CompletionItem, CompletionList, Definition, DefinitionLink, DocumentHighlight, DocumentLink, DocumentSymbol, Event, FoldingRange, FormattingOptions, Hover, LinkedEditingRanges, Location, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SemanticTokensLegend, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
+import { CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CancellationToken, CodeAction, CodeActionContext, CodeActionKind, CodeLens, Color, ColorInformation, ColorPresentation, Command, CompletionContext, CompletionItem, CompletionList, Definition, DefinitionLink, DocumentHighlight, DocumentLink, DocumentSymbol, Event, FoldingRange, FormattingOptions, Hover, LinkedEditingRanges, Location, Position, Range, SelectionRange, SemanticTokens, SemanticTokensDelta, SignatureHelp, SignatureHelpContext, SymbolInformation, TextEdit, WorkspaceEdit } from 'vscode-languageserver-protocol'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { URI } from 'vscode-uri'
 
@@ -692,10 +692,7 @@ export interface DocumentSemanticTokensProvider {
   /**
    * An optional event to signal that the semantic tokens from this provider have changed.
    */
-  // TODO: SemantiTokens
   onDidChangeSemanticTokens?: Event<void>
-
-  legend: SemanticTokensLegend
 
   /**
    * Tokens in a file are represented as an array of integers. The position of each token is expressed relative to
@@ -796,7 +793,6 @@ export interface DocumentSemanticTokensProvider {
  * semantic tokens.
  */
 export interface DocumentRangeSemanticTokensProvider {
-  legend: SemanticTokensLegend
   /**
    * @see [provideDocumentSemanticTokens](#DocumentSemanticTokensProvider.provideDocumentSemanticTokens).
    */
