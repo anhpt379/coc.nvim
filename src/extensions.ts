@@ -830,13 +830,14 @@ export class Extensions {
   private createExtension(root: string, packageJSON: any, type: ExtensionType): void {
     let id = packageJSON.name
     let isActive = false
-    let exports = null
+    let result: Promise<API> | undefined
     let filename = path.join(root, packageJSON.main || 'index.js')
     let ext: ExtensionExport
     let subscriptions: Disposable[] = []
+    let exports: any
     let extension: any = {
-      activate: async (): Promise<API> => {
-        if (isActive) return exports as API
+      activate: (): Promise<API> => {
+        if (result) return result
         let context = {
           subscriptions,
           extensionPath: root,
@@ -846,7 +847,6 @@ export class Extensions {
           storagePath: path.join(this.root, `${id}-data`),
           logger: createLogger(id)
         }
-        isActive = true
         if (!ext) {
           try {
             let isEmpty = !(packageJSON.engines || {}).hasOwnProperty('coc')
@@ -856,14 +856,22 @@ export class Extensions {
             return
           }
         }
-        try {
-          exports = await Promise.resolve(ext.activate(context))
-          logger.debug('activate:', id)
-        } catch (e) {
-          isActive = false
-          logger.error(`Error on active extension ${id}: ${e.stack}`, e)
-        }
-        return exports as API
+        result = new Promise((resolve, reject) => {
+          try {
+            Promise.resolve(ext.activate(context)).then(res => {
+              isActive = true
+              exports = res
+              resolve(res)
+            }, e => {
+              logger.error(`Error on active extension ${id}: ${e.message}`, e)
+              reject(e)
+            })
+          } catch (e) {
+            logger.error(`Error on active extension ${id}: ${e.stack}`, e)
+            reject(e)
+          }
+        })
+        return result
       }
     }
     Object.defineProperties(extension, {
@@ -884,7 +892,10 @@ export class Extensions {
         enumerable: true
       },
       exports: {
-        get: () => exports,
+        get: () => {
+          if (!isActive) throw new Error(`Invalid access to exports, extension "${id}" not activated`)
+          return exports
+        },
         enumerable: true
       }
     })
@@ -898,6 +909,8 @@ export class Extensions {
       filepath: filename,
       deactivate: () => {
         if (!isActive) return
+        result = undefined
+        exports = undefined
         isActive = false
         disposeAll(subscriptions)
         subscriptions.splice(0, subscriptions.length)
